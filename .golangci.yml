@@ -1,0 +1,40 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose      # Critical: ensures HTTP response bodies are closed
+    - errcheck       # Essential: checks error handling
+    - gosec          # Essential: security analysis
+    - govet          # Essential: standard Go analysis
+    - staticcheck    # Essential: comprehensive static analysis (includes gosimple)
+    - unused         # Good: dead code detection
+    - revive         # Good: style and convention enforcement
+    - gocyclo        # Good: complexity checking
+    - misspell       # Nice: typo detection
+    - noctx          # Critical for your project: context usage in HTTP
+    - unconvert      # Nice: remove unnecessary conversions
+    - unparam        # Nice: detect unused parameters
+    - ineffassign    # Good: detect ineffectual assignments
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    enable-all: true
+  gocyclo:
+    min-complexity: 15
+  revive:
+    severity: warning
+  gosec:
+    severity: medium
+    confidence: medium
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  tests: true

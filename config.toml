@@ -1,0 +1,47 @@
+# Search API Benchmark Configuration
+# This file defines test scenarios for comparing Firecrawl and Tavily APIs
+
+[general]
+concurrency = 3
+timeout = "45s"
+output_dir = "./results"
+
+# Search tests - evaluate web search capabilities
+[[tests]]
+name = "Search - AI Research"
+type = "search"
+query = "latest advances in transformer architecture 2024"
+expected_topics = ["transformer", "attention", "LLM", "AI"]
+
+[[tests]]
+name = "Search - Current Events"
+type = "search"
+query = "renewable energy trends 2024 solar wind"
+expected_topics = ["solar", "wind", "renewable", "energy"]
+
+[[tests]]
+name = "Search - Programming"
+type = "search"
+query = "Go programming language concurrency patterns"
+expected_topics = ["Go", "golang", "concurrency", "goroutine"]
+
+# Extraction tests - evaluate content extraction from URLs
+[[tests]]
+name = "Extract - Documentation"
+type = "extract"
+url = "https://docs.python.org/3/tutorial/"
+expected_content = ["Python", "tutorial", "programming"]
+
+[[tests]]
+name = "Extract - Article"
+type = "extract"
+url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
+expected_content = ["artificial intelligence", "AI", "machine learning"]
+
+# Crawl tests - evaluate website crawling (smaller scale for speed)
+[[tests]]
+name = "Crawl - Small Site"
+type = "crawl"
+url = "https://example.com"
+max_pages = 3
+max_depth = 1
