@@ -31,6 +31,9 @@ make build
 # Exclude search tests (extract/crawl only)
 ./build/search-api-bench -no-search
 
+# Enable AI quality scoring (requires embedding/reranker env vars)
+./build/search-api-bench -quality
+
 # Quick test mode (3 tests, 20s timeout)
 ./build/search-api-bench -quick
 
@@ -57,10 +60,13 @@ JINA_API_KEY=your_key
 MIXEDBREAD_API_KEY=your_key
 
 # Optional: AI quality scoring
-EMBEDDING_MODEL_BASE_URL=https://api.tokenfactory.nebius.com/v1
-EMBEDDING_EMBEDDING_MODEL_API_KEY=your_key
-RERANKER_MODEL_BASE_URL=https://api.novita.ai/openai/v1
+EMBEDDING_MODEL_BASE_URL=https://api.provider.com/v1
+EMBEDDING_MODEL_API_KEY=your_key
+EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B    # Optional: custom model
+
+RERANKER_MODEL_BASE_URL=https://api.provider.com/v1
 RERANKER_MODEL_API_KEY=your_key
+RERANKER_MODEL=Qwen/Qwen3-Reranker-8B      # Optional: custom model
 ```
 
 ### 2. Configure Tests
@@ -100,6 +106,7 @@ max_depth = 2
 | `-output` | Output directory | (from config) |
 | `-providers` | Comma-separated or `all` | `all` |
 | `-format` | `html`, `md`, `json`, `all` | `all` |
+| `-quality` | Enable AI quality scoring | `false` |
 | `-quick` | Reduced test set | `false` |
 | `-debug` | Request/response logging | `false` |
 | `-debug-full` | Complete bodies + timing breakdown | `false` |
@@ -126,6 +133,7 @@ cmd/bench/main.go              # CLI entry, provider init
 │   ├── config/                # TOML loading
 │   ├── providers/             # Provider implementations
 │   │   ├── interface.go       # Provider interface
+│   │   ├── retry.go           # HTTP retry logic
 │   │   ├── firecrawl/
 │   │   ├── tavily/
 │   │   ├── local/             # Colly-based, no API key
@@ -172,6 +180,7 @@ make release         # Create release archives
 - **Concurrent**: Semaphore-based rate limiting
 - **Thread-safe**: Mutex-protected metrics
 - **Extensible**: Provider interface for easy additions
+- **Resilient**: Automatic retries with exponential backoff (3 retries, handles 429/5xx)
 
 ## API Pricing (February 2026)
 
@@ -186,6 +195,8 @@ Running the **full benchmark suite** (13 tests):
 | Jina | ~$0.001-0.01 | 10M tokens |
 | Mixedbread | ~$0.01-0.03 | 1,000 files |
 | Local | Free | Unlimited |
+
+Cost tracking is included in reports when data is available from providers.
 
 ## Libraries for Custom Integration
 
