@@ -6,42 +6,108 @@ concurrency = 3
 timeout = "45s"
 output_dir = "./results"
 
-# Search tests - evaluate web search capabilities
-[[tests]]
-name = "Search - AI Research"
-type = "search"
-query = "latest advances in transformer architecture 2024"
-expected_topics = ["transformer", "attention", "LLM", "AI"]
+# =============================================================================
+# SEARCH TESTS - Comprehensive evaluation of search capabilities
+# =============================================================================
 
+# Test 1: Basic factual search (should work well for both)
 [[tests]]
-name = "Search - Current Events"
+name = "Search - Basic Facts"
 type = "search"
-query = "renewable energy trends 2024 solar wind"
-expected_topics = ["solar", "wind", "renewable", "energy"]
+query = "capital of France population"
+expected_topics = ["Paris", "France", "population", "million"]
 
+# Test 2: Technical/Programming search (tests code snippet retrieval)
 [[tests]]
-name = "Search - Programming"
+name = "Search - Technical Deep Dive"
 type = "search"
-query = "Go programming language concurrency patterns"
-expected_topics = ["Go", "golang", "concurrency", "goroutine"]
+query = "Rust programming memory safety ownership borrowing"
+expected_topics = ["Rust", "ownership", "borrowing", "memory", "safety", "borrow checker"]
 
-# Extraction tests - evaluate content extraction from URLs
+# Test 3: Recent events search (tests recency/indexing speed)
 [[tests]]
-name = "Extract - Documentation"
+name = "Search - Recent Technology"
+type = "search"
+query = "OpenAI GPT-5 release date features 2024 2025"
+expected_topics = ["OpenAI", "GPT", "model", "AI", "release"]
+
+# Test 4: Complex multi-topic search (tests semantic understanding)
+[[tests]]
+name = "Search - Complex Query"
+type = "search"
+query = "machine learning applications in healthcare diagnosis radiology"
+expected_topics = ["machine learning", "healthcare", "diagnosis", "radiology", "medical", "imaging"]
+
+# Test 5: Niche/academic search (tests comprehensive indexing)
+[[tests]]
+name = "Search - Niche Academic"
+type = "search"
+query = "CRISPR Cas9 off-target effects mitigation strategies"
+expected_topics = ["CRISPR", "Cas9", "off-target", "gene editing", "guide RNA"]
+
+# Test 6: Commercial/product search (tests structured data extraction)
+[[tests]]
+name = "Search - Product Comparison"
+type = "search"
+query = "AWS Azure Google Cloud pricing comparison 2024"
+expected_topics = ["AWS", "Azure", "Google Cloud", "pricing", "comparison"]
+
+# =============================================================================
+# EXTRACTION TESTS - Content extraction quality and completeness
+# =============================================================================
+
+# Test 7: Documentation site (tests structured content extraction)
+[[tests]]
+name = "Extract - Technical Docs"
 type = "extract"
 url = "https://docs.python.org/3/tutorial/"
-expected_content = ["Python", "tutorial", "programming"]
+expected_content = ["Python", "tutorial", "interpreter", "programming", "examples"]
 
+# Test 8: Wikipedia article (tests long-form content handling)
 [[tests]]
-name = "Extract - Article"
+name = "Extract - Encyclopedia Article"
 type = "extract"
 url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
-expected_content = ["artificial intelligence", "AI", "machine learning"]
+expected_content = ["artificial intelligence", "machine learning", "neural networks", "algorithms"]
 
-# Crawl tests - evaluate website crawling (smaller scale for speed)
+# Test 9: Blog/News article (tests article extraction)
 [[tests]]
-name = "Crawl - Small Site"
+name = "Extract - News Article"
+type = "extract"
+url = "https://news.ycombinator.com"
+expected_content = ["Hacker News", "submit", "comments", "technology"]
+
+# Test 10: Developer documentation with code (tests code block preservation)
+[[tests]]
+name = "Extract - Code Documentation"
+type = "extract"
+url = "https://gobyexample.com/"
+expected_content = ["Go", "examples", "programming", "tutorial"]
+
+# =============================================================================
+# CRAWL TESTS - Website crawling depth and breadth
+# =============================================================================
+
+# Test 11: Single page crawl (baseline)
+[[tests]]
+name = "Crawl - Single Page"
 type = "crawl"
 url = "https://example.com"
-max_pages = 3
+max_pages = 1
+max_depth = 0
+
+# Test 12: Multi-page shallow crawl (tests link discovery)
+[[tests]]
+name = "Crawl - Shallow Multi-Page"
+type = "crawl"
+url = "https://httpbin.org"
+max_pages = 5
 max_depth = 1
+
+# Test 13: Deep crawl (tests depth handling - Firecrawl advantage)
+[[tests]]
+name = "Crawl - Deep Crawl"
+type = "crawl"
+url = "https://docs.python.org/3/"
+max_pages = 10
+max_depth = 2

@@ -222,7 +222,7 @@ func (g *Generator) generateChartScripts() string {
                 labels: [%s],
                 datasets: [{
                     label: 'Average Latency (ms)',
-                    data: %v,
+                    data: [%s],
                     backgroundColor: [%s],
                     borderRadius: 4
                 }]
@@ -247,7 +247,7 @@ func (g *Generator) generateChartScripts() string {
                 labels: [%s],
                 datasets: [{
                     label: 'Total Credits Used',
-                    data: %v,
+                    data: [%s],
                     backgroundColor: [%s],
                     borderRadius: 4
                 }]
@@ -272,7 +272,7 @@ func (g *Generator) generateChartScripts() string {
                 labels: [%s],
                 datasets: [{
                     label: 'Success Rate (%%)',
-                    data: %v,
+                    data: [%s],
                     backgroundColor: [%s],
                     borderRadius: 4
                 }]
@@ -293,9 +293,9 @@ func (g *Generator) generateChartScripts() string {
                 }
             }
         });
-`, joinStrings(providerNames), avgLatencies, joinStrings(colors[:len(providers)]),
-		joinStrings(providerNames), totalCredits, joinStrings(colors[:len(providers)]),
-		joinStrings(providerNames), successRates, joinStrings(colors[:len(providers)]))
+`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors[:len(providers)]),
+		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors[:len(providers)]),
+		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors[:len(providers)]))
 }
 
 func joinStrings(strs []string) string {
@@ -306,6 +306,30 @@ func joinStrings(strs []string) string {
 			result += sep
 		}
 		result += s
+	}
+	return result
+}
+
+func formatFloatSlice(nums []float64) string {
+	const sep = ", "
+	result := ""
+	for i, n := range nums {
+		if i > 0 {
+			result += sep
+		}
+		result += fmt.Sprintf("%.2f", n)
+	}
+	return result
+}
+
+func formatIntSlice(nums []int) string {
+	const sep = ", "
+	result := ""
+	for i, n := range nums {
+		if i > 0 {
+			result += sep
+		}
+		result += fmt.Sprintf("%d", n)
 	}
 	return result
 }
