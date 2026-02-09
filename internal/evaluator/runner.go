@@ -198,8 +198,8 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 			fmt.Printf("  ✓ %s: %d results, %v latency, %d/%d topics matched\n",
 				prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), matchedTopics, len(test.ExpectedTopics))
 		} else {
-			fmt.Printf("  ✓ %s: %d results, %v latency, %d credits\n",
-				prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), searchResult.CreditsUsed)
+			fmt.Printf("  ✓ %s: %d results, %v latency, $%.4f cost\n",
+				prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), result.CostUSD)
 		}
 	}
 
@@ -269,8 +269,8 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 			fmt.Printf("  ✓ %s: %d chars, %v latency, %d/%d content items matched\n",
 				prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), matchedContent, len(test.ExpectedContent))
 		} else {
-			fmt.Printf("  ✓ %s: %d chars, %v latency, %d credits\n",
-				prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), extractResult.CreditsUsed)
+			fmt.Printf("  ✓ %s: %d chars, %v latency, $%.4f cost\n",
+				prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), result.CostUSD)
 		}
 	}
 
@@ -335,8 +335,8 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	result.ContentLength = contentLength
 
 	if r.progress == nil || !r.progress.IsEnabled() {
-		fmt.Printf("  ✓ %s: %d pages, %d chars, %v latency, %d credits\n",
-			prov.Name(), crawlResult.TotalPages, contentLength, crawlResult.Latency.Round(time.Millisecond), crawlResult.CreditsUsed)
+		fmt.Printf("  ✓ %s: %d pages, %d chars, %v latency, $%.4f cost\n",
+			prov.Name(), crawlResult.TotalPages, contentLength, crawlResult.Latency.Round(time.Millisecond), result.CostUSD)
 	}
 
 	// Perform quality scoring if scorer is available
