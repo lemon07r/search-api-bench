@@ -48,14 +48,17 @@ func (c *Client) Name() string {
 }
 
 // Search performs a web search using Firecrawl
+// Leverages native capabilities: scrape options, location settings
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
 
 	payload := map[string]interface{}{
 		"query": query,
 		"limit": opts.MaxResults,
+		"lang":  "en", // Default to English for consistent results
 	}
 
+	// Advanced search includes full scraping with markdown format
 	if opts.SearchDepth == "advanced" {
 		payload["scrapeOptions"] = map[string]interface{}{
 			"formats": []string{"markdown"},
@@ -182,15 +185,22 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 }
 
 // Crawl crawls a website using Firecrawl
+// Leverages native capabilities: maxDepth, scrape options, exclude paths
 func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
 
 	payload := map[string]interface{}{
-		"url":   url,
-		"limit": opts.MaxPages,
+		"url":      url,
+		"limit":    opts.MaxPages,
+		"maxDepth": opts.MaxDepth, // Firecrawl supports max depth natively
 		"scrapeOptions": map[string]interface{}{
 			"formats": []string{"markdown"},
 		},
+	}
+
+	// Add exclude paths if provided
+	if len(opts.ExcludePaths) > 0 {
+		payload["excludePaths"] = opts.ExcludePaths
 	}
 
 	body, err := json.Marshal(payload)
