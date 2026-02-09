@@ -13,6 +13,7 @@ import (
 	"github.com/lamim/search-api-bench/internal/metrics"
 	"github.com/lamim/search-api-bench/internal/providers"
 	"github.com/lamim/search-api-bench/internal/providers/firecrawl"
+	"github.com/lamim/search-api-bench/internal/providers/local"
 	"github.com/lamim/search-api-bench/internal/providers/tavily"
 	"github.com/lamim/search-api-bench/internal/report"
 )
@@ -21,7 +22,7 @@ func main() {
 	var (
 		configPath    = flag.String("config", "config.toml", "Path to configuration file")
 		outputDir     = flag.String("output", "", "Output directory for reports (overrides config)")
-		providersFlag = flag.String("providers", "all", "Providers to test: all, firecrawl, tavily")
+		providersFlag = flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local")
 		format        = flag.String("format", "all", "Report format: all, html, md, json")
 	)
 	flag.Parse()
@@ -83,6 +84,15 @@ func main() {
 			}
 			provs = append(provs, client)
 			fmt.Printf("✓ Initialized Tavily provider\n")
+
+		case "local":
+			client, err := local.NewClient()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Local crawler: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Local crawler provider (no API key required)\n")
 		}
 	}
 
@@ -177,7 +187,7 @@ func printSummary(collector *metrics.Collector) {
 
 func parseProviders(s string) []string {
 	if s == "all" {
-		return []string{"firecrawl", "tavily"}
+		return []string{"firecrawl", "tavily", "local"}
 	}
 	return strings.Split(s, ",")
 }

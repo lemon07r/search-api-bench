@@ -11,11 +11,11 @@ import (
 
 func TestParseProviders_All(t *testing.T) {
 	result := parseProviders("all")
-	if len(result) != 2 {
-		t.Errorf("expected 2 providers for 'all', got %d", len(result))
+	if len(result) != 3 {
+		t.Errorf("expected 3 providers for 'all', got %d", len(result))
 	}
-	if result[0] != "firecrawl" || result[1] != "tavily" {
-		t.Errorf("expected [firecrawl, tavily], got %v", result)
+	if result[0] != "firecrawl" || result[1] != "tavily" || result[2] != "local" {
+		t.Errorf("expected [firecrawl, tavily, local], got %v", result)
 	}
 }
 

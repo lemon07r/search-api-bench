@@ -44,6 +44,9 @@ run-firecrawl: build
 run-tavily: build
 	$(BUILD_DIR)/$(BINARY_NAME) -providers tavily
 
+run-local: build
+	$(BUILD_DIR)/$(BINARY_NAME) -providers local
+
 # Install dependencies
 deps:
 	$(GOMOD) download
@@ -135,6 +138,9 @@ help:
 	@echo "  make build          - Build binary for current platform"
 	@echo "  make build-all      - Build for all platforms (Linux, macOS, Windows)"
 	@echo "  make run            - Build and run benchmark"
+	@echo "  make run-firecrawl  - Run benchmark with Firecrawl provider only"
+	@echo "  make run-tavily     - Run benchmark with Tavily provider only"
+	@echo "  make run-local      - Run benchmark with Local crawler only (no API key)"
 	@echo "  make test           - Run tests"
 	@echo "  make test-coverage  - Run tests with coverage report"
 	@echo "  make fmt            - Format code"
