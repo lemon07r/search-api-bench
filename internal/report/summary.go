@@ -138,11 +138,24 @@ func formatQualityCoverage(stats testTypeQualityStats) string {
 	return fmt.Sprintf("%.1f%% (%d/%d)", stats.CoveragePct(), stats.ScoredTests, stats.ExecutedTests)
 }
 
+func scoreLabelForTestType(testType string) string {
+	switch testType {
+	case "search":
+		return "Search Relevance (Model-Assisted)"
+	case "extract":
+		return "Extraction Heuristic"
+	case "crawl":
+		return "Crawl Heuristic"
+	default:
+		return "-"
+	}
+}
+
 func (g *Generator) writeQualityByTestType(sb *strings.Builder, providers []string) {
-	sb.WriteString("### Quality by Test Type\n\n")
-	sb.WriteString("_Search quality uses semantic/reranker signals; extract and crawl quality use heuristic scoring._\n\n")
-	sb.WriteString("| Provider | Search Quality | Search Coverage | Extract Quality | Extract Coverage | Crawl Quality | Crawl Coverage |\n")
-	sb.WriteString("|----------|----------------|-----------------|-----------------|------------------|---------------|---------------|\n")
+	sb.WriteString("### Scoring by Test Type\n\n")
+	sb.WriteString("_Search relevance uses model-assisted signals; extract and crawl scores are rule-based heuristics._\n\n")
+	sb.WriteString("| Provider | Search Relevance | Search Coverage | Extract Heuristic | Extract Coverage | Crawl Heuristic | Crawl Coverage |\n")
+	sb.WriteString("|----------|------------------|-----------------|-------------------|------------------|-----------------|---------------|\n")
 
 	for _, provider := range providers {
 		byType := g.computeProviderQualityByTestType(provider)
@@ -164,7 +177,7 @@ func (g *Generator) writeQualityByTestType(sb *strings.Builder, providers []stri
 // writeComparisonTable writes the comparison table for all providers
 func (g *Generator) writeComparisonTable(sb *strings.Builder, providers []string) {
 	sb.WriteString("### Summary by Provider\n\n")
-	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Quality Coverage |\n")
+	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Scoring Coverage |\n")
 	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|------------------|\n")
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
@@ -236,59 +249,67 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 	}
 	sb.WriteString("\n")
 
-	// Quality ranking - only if quality scores exist
-	hasQualityScores := false
-	for _, ps := range allSummaries {
-		if ps.summary.AvgQualityScore > 0 {
-			hasQualityScores = true
-			break
-		}
-	}
-	if hasQualityScores {
-		sb.WriteString("**Reliability-Adjusted Quality (quality x success x coverage):**\n")
-		sortedByAdjustedQuality := make([]providerSummary, len(allSummaries))
-		copy(sortedByAdjustedQuality, allSummaries)
-		sort.Slice(sortedByAdjustedQuality, func(i, j int) bool {
-			return sortedByAdjustedQuality[i].summary.ReliabilityAdjustedQuality > sortedByAdjustedQuality[j].summary.ReliabilityAdjustedQuality
-		})
-		for i, ps := range sortedByAdjustedQuality {
-			fmt.Fprintf(
-				sb,
-				"%d. **%s**: %.1f/100 (quality %.1f, success %.1f%%, coverage %.1f%%)\n",
-				i+1,
-				ps.name,
-				ps.summary.ReliabilityAdjustedQuality,
-				ps.summary.AvgQualityScore,
-				ps.summary.SuccessRate,
-				ps.summary.QualityCoveragePct,
-			)
-		}
-		sb.WriteString("\n")
+	g.writeScoreRanking(
+		sb,
+		"**Search Relevance (model-assisted, search tests only):**\n",
+		providers,
+		func(stats providerQualityByTestType) testTypeQualityStats { return stats.Search },
+	)
+	g.writeScoreRanking(
+		sb,
+		"**Extraction Heuristic (extract tests only):**\n",
+		providers,
+		func(stats providerQualityByTestType) testTypeQualityStats { return stats.Extract },
+	)
+	g.writeScoreRanking(
+		sb,
+		"**Crawl Heuristic (crawl tests only):**\n",
+		providers,
+		func(stats providerQualityByTestType) testTypeQualityStats { return stats.Crawl },
+	)
+}
 
-		sb.WriteString("**Raw Quality Score (scored tests only):**\n")
-		sortedByQuality := make([]providerSummary, 0, len(allSummaries))
-		for _, ps := range allSummaries {
-			if ps.summary.AvgQualityScore > 0 {
-				sortedByQuality = append(sortedByQuality, ps)
-			}
+type scoreStatsSelector func(providerQualityByTestType) testTypeQualityStats
+
+type scoreRankingEntry struct {
+	name  string
+	stats testTypeQualityStats
+}
+
+func (g *Generator) writeScoreRanking(sb *strings.Builder, heading string, providers []string, selector scoreStatsSelector) {
+	entries := make([]scoreRankingEntry, 0, len(providers))
+	for _, provider := range providers {
+		stats := selector(g.computeProviderQualityByTestType(provider))
+		if stats.ScoredTests == 0 {
+			continue
 		}
-		sort.Slice(sortedByQuality, func(i, j int) bool {
-			return sortedByQuality[i].summary.AvgQualityScore > sortedByQuality[j].summary.AvgQualityScore
+		entries = append(entries, scoreRankingEntry{
+			name:  provider,
+			stats: stats,
 		})
-		for i, ps := range sortedByQuality {
-			fmt.Fprintf(
-				sb,
-				"%d. **%s**: %.1f/100 (%d/%d scored, %.1f%% coverage)\n",
-				i+1,
-				ps.name,
-				ps.summary.AvgQualityScore,
-				ps.summary.ScoredTests,
-				ps.summary.ExecutedTests,
-				ps.summary.QualityCoveragePct,
-			)
-		}
-		sb.WriteString("\n")
 	}
+	if len(entries) == 0 {
+		return
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].stats.AvgQuality > entries[j].stats.AvgQuality
+	})
+
+	sb.WriteString(heading)
+	for i, entry := range entries {
+		fmt.Fprintf(
+			sb,
+			"%d. **%s**: %.1f/100 (coverage %.1f%%, scored %d/%d)\n",
+			i+1,
+			entry.name,
+			entry.stats.AvgQuality,
+			entry.stats.CoveragePct(),
+			entry.stats.ScoredTests,
+			entry.stats.ExecutedTests,
+		)
+	}
+	sb.WriteString("\n")
 }
 
 // writePairwiseComparison writes the detailed comparison for exactly 2 providers
@@ -347,20 +368,38 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 	fmt.Fprintf(sb, "- %s avg content: %.0f chars\n", providers[0], summary1.AvgContentLength)
 	fmt.Fprintf(sb, "- %s avg content: %.0f chars\n", providers[1], summary2.AvgContentLength)
 
-	// Quality comparison if scores exist
-	if summary1.AvgQualityScore > 0 && summary2.AvgQualityScore > 0 {
-		sb.WriteString("\n**Quality Score Comparison:**\n")
-		qualityDiff := summary2.AvgQualityScore - summary1.AvgQualityScore
-		betterQuality := providers[0]
-		if summary2.AvgQualityScore > summary1.AvgQualityScore {
-			betterQuality = providers[1]
+	byType1 := g.computeProviderQualityByTestType(providers[0])
+	byType2 := g.computeProviderQualityByTestType(providers[1])
+	type pairwiseScore struct {
+		label string
+		a     testTypeQualityStats
+		b     testTypeQualityStats
+	}
+	comparisons := []pairwiseScore{
+		{label: "Search Relevance (model-assisted)", a: byType1.Search, b: byType2.Search},
+		{label: "Extraction Heuristic", a: byType1.Extract, b: byType2.Extract},
+		{label: "Crawl Heuristic", a: byType1.Crawl, b: byType2.Crawl},
+	}
+	hasAnyScoreComparison := false
+	for _, comp := range comparisons {
+		if comp.a.ScoredTests == 0 || comp.b.ScoredTests == 0 {
+			continue
 		}
-		if qualityDiff < 0 {
-			qualityDiff = -qualityDiff
+		if !hasAnyScoreComparison {
+			sb.WriteString("\n**Scoring Comparison by Test Type:**\n")
+			hasAnyScoreComparison = true
 		}
-		fmt.Fprintf(sb, "- **%s** has %.1f points higher quality score\n", betterQuality, qualityDiff)
-		fmt.Fprintf(sb, "- %s avg quality: %.1f/100\n", providers[0], summary1.AvgQualityScore)
-		fmt.Fprintf(sb, "- %s avg quality: %.1f/100\n", providers[1], summary2.AvgQualityScore)
+		scoreDiff := comp.b.AvgQuality - comp.a.AvgQuality
+		better := providers[0]
+		if comp.b.AvgQuality > comp.a.AvgQuality {
+			better = providers[1]
+		}
+		if scoreDiff < 0 {
+			scoreDiff = -scoreDiff
+		}
+		fmt.Fprintf(sb, "- %s: **%s** leads by %.1f points\n", comp.label, better, scoreDiff)
+		fmt.Fprintf(sb, "  %s: %.1f/100 (%d/%d scored)\n", providers[0], comp.a.AvgQuality, comp.a.ScoredTests, comp.a.ExecutedTests)
+		fmt.Fprintf(sb, "  %s: %.1f/100 (%d/%d scored)\n", providers[1], comp.b.AvgQuality, comp.b.ScoredTests, comp.b.ExecutedTests)
 	}
 }
 
@@ -375,7 +414,7 @@ func (g *Generator) GenerateMarkdown() error {
 
 	// Overview table
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Quality Coverage |\n")
+	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Scoring Coverage |\n")
 	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|------------------|\n")
 
 	for _, provider := range providers {
@@ -419,8 +458,8 @@ func (g *Generator) GenerateMarkdown() error {
 
 		// Use appropriate headers based on whether quality scores exist
 		if hasQualityScores {
-			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details | Quality | Semantic | Reranker |\n")
-			sb.WriteString("|----------|--------|---------|------------|---------|---------|----------|----------|\n")
+			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details | Score Family | Score | Semantic (Search) | Reranker (Search) |\n")
+			sb.WriteString("|----------|--------|---------|------------|---------|--------------|-------|-------------------|-------------------|\n")
 		} else {
 			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details |\n")
 			sb.WriteString("|----------|--------|---------|------------|---------|\n")
@@ -458,12 +497,13 @@ func (g *Generator) GenerateMarkdown() error {
 				if r.RerankerScore > 0 {
 					rerankerStr = fmt.Sprintf("%.1f", r.RerankerScore)
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s |\n",
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 					r.Provider,
 					status,
 					FormatLatency(r.Latency),
 					formatCostUSD(r.CostUSD),
 					details,
+					scoreLabelForTestType(r.TestType),
 					qualityStr,
 					semanticStr,
 					rerankerStr,
@@ -517,6 +557,8 @@ func (g *Generator) GenerateJSON() error {
 		qualityByTestType[provider] = g.computeProviderQualityByTestType(provider)
 	}
 	data["summaries"] = summaries
+	data["scoring_by_test_type"] = qualityByTestType
+	// Backward-compatible alias for existing downstream consumers.
 	data["quality_by_test_type"] = qualityByTestType
 
 	jsonData, err := json.MarshalIndent(data, "", "  ")
