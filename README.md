@@ -30,6 +30,9 @@ make build
 
 # Debug mode with request logging
 ./build/search-api-bench -debug
+
+# Full debug with complete bodies + timing breakdown
+./build/search-api-bench -debug-full
 ```
 
 ## Setup
@@ -93,6 +96,7 @@ max_depth = 2
 | `-format` | `html`, `md`, `json`, `all` | `all` |
 | `-quick` | Reduced test set | `false` |
 | `-debug` | Request/response logging | `false` |
+| `-debug-full` | Complete bodies + timing breakdown | `false` |
 | `-no-progress` | Disable progress bar | `false` |
 
 ## Reports
@@ -104,7 +108,7 @@ Results saved to `results/YYYY-MM-DD_HH-MM-SS/`:
 | `report.html` | Interactive charts (Chart.js) |
 | `report.md` | Markdown summary tables |
 | `report.json` | Raw data export |
-| `debug.json` | Request/response logs (with `-debug`) |
+| `debug/` | Per-provider logs (with `-debug` or `-debug-full`) |
 
 ## Architecture
 
