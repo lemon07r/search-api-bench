@@ -283,8 +283,8 @@ func (g *Generator) GenerateMarkdown() error {
 
 		// Use appropriate headers based on whether quality scores exist
 		if hasQualityScores {
-			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details | Quality |\n")
-			sb.WriteString("|----------|--------|---------|------------|---------|---------|\n")
+			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details | Quality | Semantic | Reranker |\n")
+			sb.WriteString("|----------|--------|---------|------------|---------|---------|----------|----------|\n")
 		} else {
 			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details |\n")
 			sb.WriteString("|----------|--------|---------|------------|---------|\n")
@@ -312,13 +312,23 @@ func (g *Generator) GenerateMarkdown() error {
 				if r.QualityScore > 0 {
 					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+				semanticStr := "-"
+				if r.SemanticScore > 0 {
+					semanticStr = fmt.Sprintf("%.1f", r.SemanticScore)
+				}
+				rerankerStr := "-"
+				if r.RerankerScore > 0 {
+					rerankerStr = fmt.Sprintf("%.1f", r.RerankerScore)
+				}
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s |\n",
 					r.Provider,
 					status,
 					FormatLatency(r.Latency),
 					formatCostUSD(r.CostUSD),
 					details,
 					qualityStr,
+					semanticStr,
+					rerankerStr,
 				))
 			} else {
 				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
