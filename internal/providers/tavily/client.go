@@ -248,31 +248,63 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 
 	pages := make([]providers.CrawledPage, 0, len(mapResult.Results))
 	creditsUsed := 1 // Map API cost
+	extractErrors := 0
 
-	// For each URL, extract content
-	for _, mappedURL := range mapResult.Results {
-		if len(pages) >= opts.MaxPages {
-			break
-		}
-
+	// Handle empty map results
+	if len(mapResult.Results) == 0 {
+		// Try to extract the starting URL directly as a fallback
 		extractOpts := providers.ExtractOptions{
 			Format:          "markdown",
 			IncludeMetadata: true,
 		}
 
-		extractResult, err := c.Extract(ctx, mappedURL, extractOpts)
+		extractResult, err := c.Extract(ctx, url, extractOpts)
 		if err != nil {
-			continue // Skip failed extractions
+			return nil, fmt.Errorf("map returned no URLs and extract failed: %w", err)
 		}
 
 		pages = append(pages, providers.CrawledPage{
-			URL:      mappedURL,
+			URL:      url,
 			Title:    extractResult.Title,
 			Content:  extractResult.Content,
 			Markdown: extractResult.Markdown,
 		})
-
 		creditsUsed += extractResult.CreditsUsed
+	} else {
+		// For each URL, extract content
+		for _, mappedURL := range mapResult.Results {
+			if len(pages) >= opts.MaxPages {
+				break
+			}
+
+			extractOpts := providers.ExtractOptions{
+				Format:          "markdown",
+				IncludeMetadata: true,
+			}
+
+			extractResult, err := c.Extract(ctx, mappedURL, extractOpts)
+			if err != nil {
+				extractErrors++
+				continue // Skip failed extractions but count them
+			}
+
+			pages = append(pages, providers.CrawledPage{
+				URL:      mappedURL,
+				Title:    extractResult.Title,
+				Content:  extractResult.Content,
+				Markdown: extractResult.Markdown,
+			})
+
+			creditsUsed += extractResult.CreditsUsed
+		}
+	}
+
+	// If we have no pages but had errors, report the failure
+	if len(pages) == 0 {
+		if extractErrors > 0 {
+			return nil, fmt.Errorf("crawl failed: all %d extractions failed", extractErrors)
+		}
+		return nil, fmt.Errorf("crawl failed: no pages extracted")
 	}
 
 	latency := time.Since(start)

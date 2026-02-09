@@ -266,19 +266,19 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 
 		req, err := http.NewRequestWithContext(ctx, "GET", checkURL, nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create status request: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("status request failed: %w", err)
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			_ = resp.Body.Close()
-			return nil, err
+			return nil, fmt.Errorf("failed to read status response: %w", err)
 		}
 		if err := resp.Body.Close(); err != nil {
 			return nil, err
@@ -286,22 +286,23 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 
 		var status crawlStatusResponse
 		if err := json.Unmarshal(body, &status); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to unmarshal status response: %w", err)
 		}
 
-		if status.Status == "completed" {
+		// Build result from available data (even partial)
+		pages := make([]providers.CrawledPage, 0, len(status.Data))
+		for _, d := range status.Data {
+			pages = append(pages, providers.CrawledPage{
+				URL:      d.Metadata.SourceURL,
+				Title:    d.Metadata.Title,
+				Content:  d.Markdown,
+				Markdown: d.Markdown,
+			})
+		}
+
+		switch status.Status {
+		case "completed":
 			latency := time.Since(start)
-
-			pages := make([]providers.CrawledPage, 0, len(status.Data))
-			for _, d := range status.Data {
-				pages = append(pages, providers.CrawledPage{
-					URL:      d.Metadata.SourceURL,
-					Title:    d.Metadata.Title,
-					Content:  d.Markdown,
-					Markdown: d.Markdown,
-				})
-			}
-
 			return &providers.CrawlResult{
 				URL:         status.URL,
 				Pages:       pages,
@@ -309,10 +310,31 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 				Latency:     latency,
 				CreditsUsed: len(pages),
 			}, nil
-		}
 
-		if status.Status == "failed" {
-			return nil, fmt.Errorf("crawl failed: %s", status.Error)
+		case "failed", "scraping_failed":
+			// Return partial results if we have any data, otherwise error
+			if len(pages) > 0 {
+				latency := time.Since(start)
+				return &providers.CrawlResult{
+					URL:         status.URL,
+					Pages:       pages,
+					TotalPages:  len(pages),
+					Latency:     latency,
+					CreditsUsed: len(pages),
+				}, nil
+			}
+			errMsg := status.Error
+			if errMsg == "" {
+				errMsg = "crawl failed with no error details"
+			}
+			return nil, fmt.Errorf("crawl %s: %s", status.Status, errMsg)
+
+		case "cancelled":
+			return nil, fmt.Errorf("crawl was cancelled")
+
+		default:
+			// Continue polling for: scraping, scheduled, etc.
+			continue
 		}
 	}
 }
