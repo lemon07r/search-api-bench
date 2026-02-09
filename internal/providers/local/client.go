@@ -201,9 +201,10 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 		colly.Async(true),
 	)
 
-	// Polite rate limiting: 2 concurrent, 500ms delay
+	// Polite rate limiting: 2 concurrent per domain, 500ms delay
+	// Use the target domain for proper per-domain limiting
 	if err := collector.Limit(&colly.LimitRule{
-		DomainGlob:  "*",
+		DomainGlob:  parsedURL.Host,
 		Parallelism: 2,
 		RandomDelay: 500 * time.Millisecond,
 	}); err != nil {

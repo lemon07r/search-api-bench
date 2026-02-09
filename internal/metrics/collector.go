@@ -2,6 +2,7 @@
 package metrics
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -47,6 +48,11 @@ type Summary struct {
 	TotalContentLength int           `json:"total_content_length"`
 	AvgContentLength   float64       `json:"avg_content_length"`
 	ResultsPerQuery    float64       `json:"results_per_query"`
+
+	// Efficiency metrics
+	CreditsPerResult float64 `json:"credits_per_result"` // credits per successful result
+	CharsPerCredit   float64 `json:"chars_per_credit"`   // content chars per credit
+	ResultsPerCredit float64 `json:"results_per_credit"` // results per credit spent
 
 	// Quality metrics
 	AvgQualityScore  float64        `json:"avg_quality_score"`
@@ -197,6 +203,15 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 		summary.ResultsPerQuery = float64(totalResultsCount) / float64(summary.TotalTests)
 	}
 
+	// Calculate efficiency metrics
+	if summary.SuccessfulTests > 0 && totalCredits > 0 {
+		summary.CreditsPerResult = float64(totalCredits) / float64(totalResultsCount)
+		summary.ResultsPerCredit = float64(totalResultsCount) / float64(totalCredits)
+	}
+	if totalCredits > 0 {
+		summary.CharsPerCredit = float64(totalContentLength) / float64(totalCredits)
+	}
+
 	// Calculate latency percentiles
 	if len(latencies) > 0 {
 		summary.P50Latency = calculatePercentileDuration(latencies, 0.50)
@@ -234,16 +249,12 @@ func calculatePercentileDuration(durations []time.Duration, percentile float64) 
 		return 0
 	}
 
-	// Simple sort (for small arrays)
+	// Use efficient sort (O(n log n)) instead of bubble sort (O(n²))
 	sorted := make([]time.Duration, len(durations))
 	copy(sorted, durations)
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[i] > sorted[j] {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
 
 	index := int(float64(len(sorted)-1) * percentile)
 	if index < 0 {

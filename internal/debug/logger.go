@@ -8,6 +8,7 @@ import (
 	"net/http/httptrace"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -273,7 +274,7 @@ func (l *Logger) LogRequest(testLog *TestLog, method, url string, headers map[st
 		Timestamp:   time.Now(),
 		Method:      method,
 		URL:         url,
-		Headers:     headers,
+		Headers:     sanitizeHeaders(headers),
 		BodyPreview: truncateString(bodyPreview, 500),
 	}
 
@@ -297,7 +298,7 @@ func (l *Logger) LogRequestWithTiming(testLog *TestLog, method, url string, head
 		Timestamp:    time.Now(),
 		Method:       method,
 		URL:          url,
-		Headers:      headers,
+		Headers:      sanitizeHeaders(headers),
 		BodyPreview:  truncateString(bodyPreview, 500),
 		Timing:       timing,
 		RetryAttempt: retryAttempt,
@@ -322,7 +323,7 @@ func (l *Logger) LogResponse(testLog *TestLog, statusCode int, headers map[strin
 	testLog.Response = &ResponseLog{
 		Timestamp:   time.Now(),
 		StatusCode:  statusCode,
-		Headers:     headers,
+		Headers:     sanitizeHeaders(headers),
 		BodyPreview: truncateString(bodyPreview, 1000),
 		BodySize:    bodySize,
 		Duration:    duration,
@@ -345,7 +346,7 @@ func (l *Logger) LogResponseWithTiming(testLog *TestLog, statusCode int, headers
 	testLog.Response = &ResponseLog{
 		Timestamp:   time.Now(),
 		StatusCode:  statusCode,
-		Headers:     headers,
+		Headers:     sanitizeHeaders(headers),
 		BodyPreview: truncateString(bodyPreview, 1000),
 		BodySize:    bodySize,
 		Duration:    duration,
@@ -490,4 +491,31 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// sanitizeHeaders masks sensitive header values like API keys and tokens
+func sanitizeHeaders(headers map[string]string) map[string]string {
+	if headers == nil {
+		return nil
+	}
+
+	sanitized := make(map[string]string, len(headers))
+	for k, v := range headers {
+		lowerKey := strings.ToLower(k)
+		// Check for sensitive header names
+		if lowerKey == "authorization" ||
+			lowerKey == "x-subscription-token" ||
+			lowerKey == "x-api-token" ||
+			strings.Contains(lowerKey, "api-key") ||
+			strings.Contains(lowerKey, "api_key") ||
+			strings.Contains(lowerKey, "secret") ||
+			strings.Contains(lowerKey, "token") ||
+			strings.Contains(lowerKey, "password") ||
+			strings.Contains(lowerKey, "key") {
+			sanitized[k] = "[REDACTED]"
+		} else {
+			sanitized[k] = v
+		}
+	}
+	return sanitized
 }
