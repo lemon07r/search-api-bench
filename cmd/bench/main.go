@@ -201,7 +201,7 @@ func printSummary(collector *metrics.Collector) {
 
 		fmt.Printf("\n%s:\n", strings.ToUpper(provider))
 		fmt.Printf("  Tests: %d (%.1f%% success)\n", summary.TotalTests, successRate)
-		fmt.Printf("  Avg Latency: %v\n", summary.AvgLatency)
+		fmt.Printf("  Avg Latency: %s\n", report.FormatLatency(summary.AvgLatency))
 		fmt.Printf("  Total Credits: %d\n", summary.TotalCreditsUsed)
 		fmt.Printf("  Avg Content: %.0f chars\n", summary.AvgContentLength)
 	}
