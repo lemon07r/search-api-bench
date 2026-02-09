@@ -64,24 +64,22 @@ func (c *Client) Name() string {
 	return "mixedbread"
 }
 
-// Search performs a search using Mixedbread AI Search API
-// Endpoint: POST /v1/search (or similar - using their search endpoint)
-// Native features leveraged:
-//   - Multimodal, multilingual search
-//   - Reranking with mxbai-rerank models
-//   - Top-k result control
-//
-// Note: Mixedbread's Search API was launched in Oct 2025 and may have different
-// endpoints. We'll implement based on their standard API patterns.
+// Search performs a web search using Mixedbread AI Search API
+// Endpoint: POST /v1/stores/search
+// Uses the public "mixedbread/web" store for real-time web search
+// Documentation: https://www.mixedbread.com/docs/stores/search
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
 
-	// Mixedbread Search API - using their search endpoint
-	// Documentation: https://www.mixedbread.com/docs/stores/search
+	// Mixedbread Stores Search API with web store
+	// The "mixedbread/web" store provides real-time web search capabilities
 	payload := map[string]interface{}{
-		"query": query,
-		"top_k": min(opts.MaxResults, 100),
-		"model": "mixedbread-ai/mxbai-rerank-large-v2", // Use their best reranking model
+		"query":             query,
+		"store_identifiers": []string{"mixedbread/web"},
+		"top_k":             opts.MaxResults,
+		"search_options": map[string]interface{}{
+			"rerank": true, // Web search results are always reranked for optimal relevance
+		},
 	}
 
 	body, err := json.Marshal(payload)
@@ -89,8 +87,8 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Try the search endpoint - Mixedbread may have different paths
-	searchURL := c.baseURL + "/v1/search"
+	// Correct endpoint for Mixedbread Stores Search API
+	searchURL := c.baseURL + "/v1/stores/search"
 
 	req, err := http.NewRequestWithContext(ctx, "POST", searchURL, bytes.NewReader(body))
 	if err != nil {
@@ -114,18 +112,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	latency := time.Since(start)
 
 	// Convert Mixedbread results to provider format
-	items := make([]providers.SearchItem, 0, len(result.Results))
-	for _, r := range result.Results {
+	// Response structure: result.Data[].{Text, Score, Metadata.{Title, URL}}
+	items := make([]providers.SearchItem, 0, len(result.Data))
+	for _, r := range result.Data {
 		items = append(items, providers.SearchItem{
-			Title:   r.Title,
-			URL:     r.URL,
-			Content: r.Content,
+			Title:   r.Metadata.Title,
+			URL:     r.Metadata.URL,
+			Content: r.Text,
 			Score:   r.Score,
 		})
 	}
 
-	// Credits: Token-based pricing (estimate)
-	creditsUsed := len(query) * 10 // Rough estimate
+	// Credits: Web search queries are billed as "search with rerank query"
+	// Rough estimate based on query complexity and result count
+	creditsUsed := 10 + len(query)*2 + len(items)*5
 
 	return &providers.SearchResult{
 		Query:        query,
@@ -308,14 +308,21 @@ func extractLinks(_, _ string) []string {
 	return []string{}
 }
 
-// Response types for Mixedbread API
-// These may need adjustment based on actual API response format
+// Response types for Mixedbread Stores Search API
+// API Documentation: https://www.mixedbread.com/docs/stores/search/web-store
 
 type searchResponse struct {
-	Results []struct {
-		Title   string  `json:"title"`
-		URL     string  `json:"url"`
-		Content string  `json:"content"`
-		Score   float64 `json:"score"`
-	} `json:"results"`
+	Object string `json:"object"`
+	Data   []struct {
+		Type     string  `json:"type"`
+		Text     string  `json:"text"`
+		Score    float64 `json:"score"`
+		FileID   string  `json:"file_id"`
+		Filename string  `json:"filename"`
+		Metadata struct {
+			Title  string `json:"title"`
+			URL    string `json:"url"`
+			Source string `json:"source"`
+		} `json:"metadata"`
+	} `json:"data"`
 }
