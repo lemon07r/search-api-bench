@@ -33,6 +33,7 @@ func (s *Scorer) SetWeights(weights ScoreWeights) {
 }
 
 // ScoreSearch performs comprehensive quality scoring for search results
+// Uses concurrent execution for embedding and reranking to minimize latency
 func (s *Scorer) ScoreSearch(ctx context.Context, query string, results []providers.SearchItem) (SearchQualityScore, error) {
 	if len(results) == 0 {
 		return SearchQualityScore{}, nil
@@ -40,18 +41,47 @@ func (s *Scorer) ScoreSearch(ctx context.Context, query string, results []provid
 
 	score := SearchQualityScore{}
 
-	// 1. Semantic relevance via embeddings
-	semanticScore, err := s.calculateSemanticRelevance(ctx, query, results)
-	if err != nil {
-		return score, fmt.Errorf("semantic scoring failed: %w", err)
+	// Run semantic relevance and reranker scoring concurrently
+	type semanticResult struct {
+		score float64
+		err   error
 	}
-	score.SemanticRelevance = semanticScore
+	type rerankerResult struct {
+		score float64
+		err   error
+	}
 
-	// 2. Reranker score
+	semanticChan := make(chan semanticResult, 1)
+	rerankerChan := make(chan rerankerResult, 1)
+
+	// Start semantic relevance calculation
+	go func() {
+		semanticScore, err := s.calculateSemanticRelevance(ctx, query, results)
+		semanticChan <- semanticResult{score: semanticScore, err: err}
+	}()
+
+	// Start reranker scoring if available
 	if s.reranker != nil {
-		rerankScore, err := s.calculateRerankerScore(ctx, query, results)
-		if err == nil {
-			score.RerankerScore = rerankScore
+		go func() {
+			rerankScore, err := s.calculateRerankerScore(ctx, query, results)
+			rerankerChan <- rerankerResult{score: rerankScore, err: err}
+		}()
+	} else {
+		close(rerankerChan)
+	}
+
+	// Wait for semantic result
+	semanticRes := <-semanticChan
+	if semanticRes.err != nil {
+		return score, fmt.Errorf("semantic scoring failed: %w", semanticRes.err)
+	}
+	score.SemanticRelevance = semanticRes.score
+
+	// Wait for reranker result (if applicable)
+	if s.reranker != nil {
+		rerankerRes := <-rerankerChan
+		if rerankerRes.err == nil {
+			score.RerankerScore = rerankerRes.score
 		}
 	}
 
@@ -134,11 +164,18 @@ func (s *Scorer) ScoreCrawl(result *providers.CrawlResult, opts providers.CrawlO
 	return score
 }
 
-// calculateSemanticRelevance computes embedding-based relevance
+// calculateSemanticRelevance computes embedding-based relevance with instruction support
 func (s *Scorer) calculateSemanticRelevance(ctx context.Context, query string, results []providers.SearchItem) (float64, error) {
 	if s.embedding == nil {
 		return 50, nil // Neutral score if no embedding client
 	}
+
+	// Use search-optimized instruction for better relevance scoring
+	oldOptions := s.embedding.GetOptions()
+	newOptions := oldOptions
+	newOptions.Instruction = InstructSearch
+	s.embedding.SetOptions(newOptions)
+	defer s.embedding.SetOptions(oldOptions)
 
 	// Prepare texts to embed
 	texts := make([]string, len(results)+1)
@@ -167,6 +204,7 @@ func (s *Scorer) calculateSemanticRelevance(ctx context.Context, query string, r
 }
 
 // calculateRerankerScore uses the reranker API for relevance scoring
+// Automatically detects Qwen3 vs BGE score ranges and normalizes appropriately
 func (s *Scorer) calculateRerankerScore(ctx context.Context, query string, results []providers.SearchItem) (float64, error) {
 	if s.reranker == nil {
 		return 50, nil
@@ -186,10 +224,10 @@ func (s *Scorer) calculateRerankerScore(ctx context.Context, query string, resul
 		return 0, nil
 	}
 
-	// Calculate average normalized score
+	// Calculate average normalized score using auto-detection
 	var totalScore float64
 	for _, r := range rerankResults {
-		totalScore += NormalizeScore(r.Relevance)
+		totalScore += AutoNormalizeScore(r.Relevance)
 	}
 
 	return totalScore / float64(len(rerankResults)), nil
