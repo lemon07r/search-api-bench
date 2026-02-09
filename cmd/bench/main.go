@@ -36,8 +36,8 @@ type cliFlags struct {
 	debugMode     *bool
 	debugFullMode *bool
 	quickMode     *bool
-	searchOnly    *bool
 	noSearch      *bool
+	noLocal       *bool
 }
 
 func parseFlags() *cliFlags {
@@ -51,8 +51,8 @@ func parseFlags() *cliFlags {
 		debugMode:     flag.Bool("debug", false, "Enable debug logging with request/response data"),
 		debugFullMode: flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
 		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
-		searchOnly:    flag.Bool("search-only", false, "Run only search tests"),
 		noSearch:      flag.Bool("no-search", false, "Exclude search tests"),
+		noLocal:       flag.Bool("no-local", false, "Exclude local provider"),
 	}
 }
 
@@ -95,17 +95,13 @@ func main() {
 		cfg = applyQuickMode(cfg)
 	}
 
-	// Validate and apply test type filters
-	if *flags.searchOnly && *flags.noSearch {
-		fmt.Fprintf(os.Stderr, "Error: cannot use both -search-only and -no-search flags\n")
-		os.Exit(1)
-	}
-
-	cfg.Tests = filterTests(cfg.Tests, *flags.searchOnly, *flags.noSearch)
-
-	if len(cfg.Tests) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no tests match the specified filters\n")
-		os.Exit(1)
+	// Apply test type filters
+	if *flags.noSearch {
+		cfg.Tests = filterTests(cfg.Tests, *flags.noSearch)
+		if len(cfg.Tests) == 0 {
+			fmt.Fprintf(os.Stderr, "Error: no tests match the specified filters\n")
+			os.Exit(1)
+		}
 	}
 
 	finalOutputDir, err := ensureOutputDir(cfg.General.OutputDir)
@@ -126,10 +122,6 @@ func main() {
 		fmt.Printf("   Tests: %d | Timeout: %s\n\n", len(cfg.Tests), cfg.General.Timeout)
 	}
 
-	if *flags.searchOnly {
-		fmt.Printf("🔍 Search-only mode: running %d search tests\n\n", len(cfg.Tests))
-	}
-
 	if *flags.noSearch {
 		fmt.Printf("🚫 No-search mode: running %d non-search tests\n\n", len(cfg.Tests))
 	}
@@ -143,7 +135,7 @@ func main() {
 		}
 	}
 
-	provs := initializeProviders(flags.providersFlag, debugLogger)
+	provs := initializeProviders(flags.providersFlag, *flags.noLocal, debugLogger)
 
 	if len(provs) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no providers available. Please check your API keys.\n")
@@ -222,9 +214,9 @@ func printSummary(collector *metrics.Collector) {
 	fmt.Println("View detailed results in the output directory.")
 }
 
-func initializeProviders(providersFlag *string, debugLogger *debug.Logger) []providers.Provider {
+func initializeProviders(providersFlag *string, noLocal bool, debugLogger *debug.Logger) []providers.Provider {
 	var provs []providers.Provider
-	providerNames := parseProviders(*providersFlag)
+	providerNames := parseProviders(*providersFlag, noLocal)
 
 	for _, name := range providerNames {
 		switch name {
@@ -340,11 +332,25 @@ func generateReports(formatFlag *string, collector *metrics.Collector, outputDir
 	printSummary(collector)
 }
 
-func parseProviders(s string) []string {
+func parseProviders(s string, noLocal bool) []string {
+	var providers []string
 	if s == "all" {
-		return []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
+		providers = []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
+	} else {
+		providers = strings.Split(s, ",")
 	}
-	return strings.Split(s, ",")
+
+	if noLocal {
+		var filtered []string
+		for _, p := range providers {
+			if p != "local" {
+				filtered = append(filtered, p)
+			}
+		}
+		providers = filtered
+	}
+
+	return providers
 }
 
 func parseFormats(s string) []string {
@@ -366,18 +372,15 @@ func ensureOutputDir(baseDir string) (string, error) {
 	return sessionDir, nil
 }
 
-// filterTests filters tests based on search-only and no-search flags
-func filterTests(tests []config.TestConfig, searchOnly, noSearch bool) []config.TestConfig {
-	if !searchOnly && !noSearch {
+// filterTests filters tests based on no-search flag
+func filterTests(tests []config.TestConfig, noSearch bool) []config.TestConfig {
+	if !noSearch {
 		return tests
 	}
 
 	var filtered []config.TestConfig
 	for _, test := range tests {
-		switch {
-		case searchOnly && test.Type == "search":
-			filtered = append(filtered, test)
-		case noSearch && test.Type != "search":
+		if test.Type != "search" {
 			filtered = append(filtered, test)
 		}
 	}
