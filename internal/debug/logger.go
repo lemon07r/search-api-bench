@@ -2,21 +2,34 @@
 package debug
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
 
+// TimingBreakdown captures detailed HTTP timing using httptrace
+type TimingBreakdown struct {
+	DNSLookup       time.Duration `json:"dns_lookup"`
+	TCPConnection   time.Duration `json:"tcp_connection"`
+	TLSHandshake    time.Duration `json:"tls_handshake"`
+	TimeToFirstByte time.Duration `json:"time_to_first_byte"`
+	TotalDuration   time.Duration `json:"total_duration"`
+}
+
 // Logger handles comprehensive debug logging for benchmark runs
 type Logger struct {
-	mu         sync.RWMutex
-	enabled    bool
-	startTime  time.Time
-	session    *Session
-	outputPath string
+	mu          sync.RWMutex
+	enabled     bool
+	fullCapture bool
+	startTime   time.Time
+	session     *Session
+	outputDir   string
+	outputPath  string
 }
 
 // Session represents the entire debug session
@@ -50,11 +63,14 @@ type TestLog struct {
 
 // RequestLog captures HTTP request details
 type RequestLog struct {
-	Timestamp   time.Time         `json:"timestamp"`
-	Method      string            `json:"method"`
-	URL         string            `json:"url"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	BodyPreview string            `json:"body_preview,omitempty"`
+	Timestamp    time.Time         `json:"timestamp"`
+	Method       string            `json:"method"`
+	URL          string            `json:"url"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	BodyPreview  string            `json:"body_preview,omitempty"`
+	BodyFull     string            `json:"body_full,omitempty"`
+	Timing       *TimingBreakdown  `json:"timing,omitempty"`
+	RetryAttempt int               `json:"retry_attempt,omitempty"`
 }
 
 // ResponseLog captures HTTP response details
@@ -63,8 +79,10 @@ type ResponseLog struct {
 	StatusCode  int               `json:"status_code"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	BodyPreview string            `json:"body_preview,omitempty"`
+	BodyFull    string            `json:"body_full,omitempty"`
 	BodySize    int               `json:"body_size"`
 	Duration    time.Duration     `json:"duration"`
+	Timing      *TimingBreakdown  `json:"timing,omitempty"`
 }
 
 // ErrorLog captures error details with context
@@ -76,22 +94,28 @@ type ErrorLog struct {
 }
 
 // NewLogger creates a new debug logger
-func NewLogger(enabled bool, outputDir string) *Logger {
+// enabled: enables basic debug logging
+// fullCapture: when true, captures complete request/response bodies (requires enabled=true)
+// outputDir: base output directory for debug files
+func NewLogger(enabled bool, fullCapture bool, outputDir string) *Logger {
 	logger := &Logger{
-		enabled:   enabled,
-		startTime: time.Now(),
+		enabled:     enabled,
+		fullCapture: fullCapture,
+		startTime:   time.Now(),
+		outputDir:   outputDir,
 		session: &Session{
 			StartTime: time.Now(),
 			Providers: make(map[string]*ProviderLog),
 			SystemInfo: map[string]interface{}{
-				"go_version": "1.21+",
-				"timestamp":  time.Now().Format(time.RFC3339),
+				"go_version":   "1.21+",
+				"timestamp":    time.Now().Format(time.RFC3339),
+				"full_capture": fullCapture,
 			},
 		},
 	}
 
 	if enabled {
-		logger.outputPath = filepath.Join(outputDir, "debug.json")
+		logger.outputPath = filepath.Join(outputDir, "debug")
 	}
 
 	return logger
@@ -100,6 +124,77 @@ func NewLogger(enabled bool, outputDir string) *Logger {
 // IsEnabled returns whether debug logging is enabled
 func (l *Logger) IsEnabled() bool {
 	return l.enabled
+}
+
+// IsFullCapture returns whether full body capture is enabled
+func (l *Logger) IsFullCapture() bool {
+	return l.fullCapture
+}
+
+// NewTraceContext creates an httptrace.ClientTrace that populates timing data
+// Returns a context with the trace attached and a *TimingBreakdown to be filled
+func (l *Logger) NewTraceContext(testLog *TestLog) (*TimingBreakdown, func()) {
+	if !l.enabled || testLog == nil {
+		return nil, func() {}
+	}
+
+	timing := &TimingBreakdown{}
+	var dnsStart, tcpStart, tlsStart, firstByteTime time.Time
+
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(_ httptrace.DNSStartInfo) {
+			dnsStart = time.Now()
+		},
+		DNSDone: func(_ httptrace.DNSDoneInfo) {
+			timing.DNSLookup = time.Since(dnsStart)
+		},
+		ConnectStart: func(_, _ string) {
+			tcpStart = time.Now()
+		},
+		ConnectDone: func(_, _ string, _ error) {
+			timing.TCPConnection = time.Since(tcpStart)
+		},
+		TLSHandshakeStart: func() {
+			tlsStart = time.Now()
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+			timing.TLSHandshake = time.Since(tlsStart)
+		},
+		GotFirstResponseByte: func() {
+			firstByteTime = time.Now()
+		},
+	}
+
+	// Return timing struct and a function to finalize total duration
+	finalize := func() {
+		if !firstByteTime.IsZero() {
+			timing.TimeToFirstByte = firstByteTime.Sub(dnsStart)
+		}
+		// TotalDuration should be set by the caller after request completes
+	}
+
+	// Store trace in test log metadata for later use
+	l.mu.Lock()
+	testLog.Metadata["_trace"] = trace
+	testLog.Metadata["_timing"] = timing
+	l.mu.Unlock()
+
+	return timing, finalize
+}
+
+// GetTraceFromTest retrieves the httptrace.ClientTrace associated with a test log
+func (l *Logger) GetTraceFromTest(testLog *TestLog) *httptrace.ClientTrace {
+	if !l.enabled || testLog == nil {
+		return nil
+	}
+
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if trace, ok := testLog.Metadata["_trace"].(*httptrace.ClientTrace); ok {
+		return trace
+	}
+	return nil
 }
 
 // LogProviderInit logs provider initialization
@@ -173,6 +268,36 @@ func (l *Logger) LogRequest(testLog *TestLog, method, url string, headers map[st
 		BodyPreview: truncateString(bodyPreview, 500),
 	}
 
+	if l.fullCapture {
+		reqLog.BodyFull = bodyPreview
+	}
+
+	testLog.Requests = append(testLog.Requests, reqLog)
+}
+
+// LogRequestWithTiming logs an HTTP request with timing information
+func (l *Logger) LogRequestWithTiming(testLog *TestLog, method, url string, headers map[string]string, bodyPreview string, timing *TimingBreakdown, retryAttempt int) {
+	if !l.enabled || testLog == nil {
+		return
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	reqLog := RequestLog{
+		Timestamp:    time.Now(),
+		Method:       method,
+		URL:          url,
+		Headers:      headers,
+		BodyPreview:  truncateString(bodyPreview, 500),
+		Timing:       timing,
+		RetryAttempt: retryAttempt,
+	}
+
+	if l.fullCapture {
+		reqLog.BodyFull = bodyPreview
+	}
+
 	testLog.Requests = append(testLog.Requests, reqLog)
 }
 
@@ -192,6 +317,39 @@ func (l *Logger) LogResponse(testLog *TestLog, statusCode int, headers map[strin
 		BodyPreview: truncateString(bodyPreview, 1000),
 		BodySize:    bodySize,
 		Duration:    duration,
+	}
+
+	if l.fullCapture {
+		testLog.Response.BodyFull = bodyPreview
+	}
+}
+
+// LogResponseWithTiming logs an HTTP response with detailed timing
+func (l *Logger) LogResponseWithTiming(testLog *TestLog, statusCode int, headers map[string]string, bodyPreview string, bodySize int, duration time.Duration, timing *TimingBreakdown) {
+	if !l.enabled || testLog == nil {
+		return
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	testLog.Response = &ResponseLog{
+		Timestamp:   time.Now(),
+		StatusCode:  statusCode,
+		Headers:     headers,
+		BodyPreview: truncateString(bodyPreview, 1000),
+		BodySize:    bodySize,
+		Duration:    duration,
+		Timing:      timing,
+	}
+
+	if l.fullCapture {
+		testLog.Response.BodyFull = bodyPreview
+	}
+
+	// Update timing total duration
+	if timing != nil {
+		timing.TotalDuration = duration
 	}
 }
 
@@ -240,7 +398,7 @@ func (l *Logger) EndTest(testLog *TestLog) {
 	testLog.Duration = now.Sub(testLog.StartTime)
 }
 
-// Finalize completes the debug session and writes the log file
+// Finalize completes the debug session and writes per-provider log files
 func (l *Logger) Finalize() error {
 	if !l.enabled {
 		return nil
@@ -252,28 +410,66 @@ func (l *Logger) Finalize() error {
 	now := time.Now()
 	l.session.EndTime = &now
 
-	// Ensure output directory exists
-	dir := filepath.Dir(l.outputPath)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	// Create debug subdirectory
+	debugDir := l.outputPath
+	if err := os.MkdirAll(debugDir, 0750); err != nil {
 		return fmt.Errorf("failed to create debug output directory: %w", err)
 	}
 
-	// Write JSON file
-	data, err := json.MarshalIndent(l.session, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal debug data: %w", err)
+	// Write session metadata
+	sessionPath := filepath.Join(debugDir, "session.json")
+	sessionData := map[string]interface{}{
+		"start_time":  l.session.StartTime,
+		"end_time":    l.session.EndTime,
+		"system_info": l.session.SystemInfo,
+		"providers":   make([]string, 0, len(l.session.Providers)),
+	}
+	for name := range l.session.Providers {
+		sessionData["providers"] = append(sessionData["providers"].([]string), name)
 	}
 
-	if err := os.WriteFile(l.outputPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write debug file: %w", err)
+	data, err := json.MarshalIndent(sessionData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal session data: %w", err)
+	}
+	if err := os.WriteFile(sessionPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write session file: %w", err)
+	}
+
+	// Write per-provider files
+	for providerName, providerLog := range l.session.Providers {
+		providerPath := filepath.Join(debugDir, providerName+".json")
+		data, err := json.MarshalIndent(providerLog, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal provider data for %s: %w", providerName, err)
+		}
+		if err := os.WriteFile(providerPath, data, 0600); err != nil {
+			return fmt.Errorf("failed to write provider file for %s: %w", providerName, err)
+		}
 	}
 
 	return nil
 }
 
-// GetOutputPath returns the path where debug data will be written
+// GetOutputPath returns the path where debug data will be written (debug directory)
 func (l *Logger) GetOutputPath() string {
 	return l.outputPath
+}
+
+// GetSessionPath returns the path to the session.json file
+func (l *Logger) GetSessionPath() string {
+	if !l.enabled {
+		return ""
+	}
+	return filepath.Join(l.outputPath, "session.json")
+}
+
+// GetProviderPath returns the path to a specific provider's debug file
+func (l *Logger) GetProviderPath(providerName string) string {
+	if !l.enabled {
+		return ""
+	}
+	return filepath.Join(l.outputPath, providerName+".json")
 }
 
 // truncateString limits a string to a maximum length with ellipsis

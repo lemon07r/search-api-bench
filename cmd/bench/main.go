@@ -34,6 +34,7 @@ type cliFlags struct {
 	noProgress    *bool
 	verbose       *bool
 	debugMode     *bool
+	debugFullMode *bool
 	quickMode     *bool
 }
 
@@ -45,7 +46,8 @@ func parseFlags() *cliFlags {
 		format:        flag.String("format", "all", "Report format: all, html, md, json"),
 		noProgress:    flag.Bool("no-progress", false, "Disable progress bar (useful for CI)"),
 		verbose:       flag.Bool("verbose", false, "Enable verbose output with full error details"),
-		debugMode:     flag.Bool("debug", false, "Enable debug logging with full request/response data"),
+		debugMode:     flag.Bool("debug", false, "Enable debug logging with request/response data"),
+		debugFullMode: flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
 		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
 	}
 }
@@ -96,7 +98,9 @@ func main() {
 	}
 	cfg.General.OutputDir = finalOutputDir
 
-	debugLogger := debug.NewLogger(*flags.debugMode, cfg.General.OutputDir)
+	// Enable debug mode if debug-full is set
+	enableDebug := *flags.debugMode || *flags.debugFullMode
+	debugLogger := debug.NewLogger(enableDebug, *flags.debugFullMode, cfg.General.OutputDir)
 
 	printBanner()
 
@@ -105,8 +109,13 @@ func main() {
 		fmt.Printf("   Tests: %d | Timeout: %s\n\n", len(cfg.Tests), cfg.General.Timeout)
 	}
 
-	if *flags.debugMode {
-		fmt.Printf("🐛 Debug mode enabled: logging to %s\n\n", debugLogger.GetOutputPath())
+	if enableDebug {
+		if *flags.debugFullMode {
+			fmt.Printf("🐛 Debug-full mode enabled: complete bodies + timing breakdown\n")
+			fmt.Printf("   Logging to: %s/\n\n", debugLogger.GetOutputPath())
+		} else {
+			fmt.Printf("🐛 Debug mode enabled: logging to %s/\n\n", debugLogger.GetOutputPath())
+		}
 	}
 
 	provs := initializeProviders(flags.providersFlag, debugLogger)
@@ -146,11 +155,11 @@ func main() {
 	_ = flags.verbose // Reserved for future use
 
 	// Finalize debug logging
-	if *flags.debugMode {
+	if enableDebug {
 		if err := debugLogger.Finalize(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write debug log: %v\n", err)
 		} else {
-			fmt.Printf("✓ Debug log written to: %s\n", debugLogger.GetOutputPath())
+			fmt.Printf("✓ Debug logs written to: %s/\n", debugLogger.GetOutputPath())
 		}
 	}
 
