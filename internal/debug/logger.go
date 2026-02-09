@@ -59,7 +59,7 @@ type TestLog struct {
 	Response  *ResponseLog           `json:"response,omitempty"`
 	Errors    []ErrorLog             `json:"errors"`
 	Metadata  map[string]interface{} `json:"metadata"`
-	
+
 	// internal metadata storage for non-serializable objects (not exported to JSON)
 	internalMeta map[string]interface{}
 }

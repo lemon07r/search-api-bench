@@ -88,7 +88,7 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	// Prepare headers
 	headers := make(map[string]string)
 	if c.apiKey != "" {
-		headers["Authorization"] = "Bearer "+c.apiKey
+		headers["Authorization"] = "Bearer " + c.apiKey
 	}
 
 	// Log the request
@@ -235,7 +235,7 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 	// Prepare headers
 	headers := make(map[string]string)
 	if c.apiKey != "" {
-		headers["Authorization"] = "Bearer "+c.apiKey
+		headers["Authorization"] = "Bearer " + c.apiKey
 	}
 
 	// Log the request
@@ -485,7 +485,7 @@ func newTraceContext(ctx context.Context) (context.Context, *debug.TimingBreakdo
 	if logger == nil || testLog == nil {
 		return ctx, nil, func() {}
 	}
-	
+
 	timing, finalize := logger.NewTraceContext(testLog)
 	trace := logger.GetTraceFromTest(testLog)
 	if trace != nil {

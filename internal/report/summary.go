@@ -85,9 +85,9 @@ func (g *Generator) GenerateMarkdown() error {
 
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
-			status := "✅ Pass"
+			status := "✓ Pass"
 			if !r.Success {
-				status = "❌ Fail"
+				status = "✗ Fail"
 			}
 
 			details := ""

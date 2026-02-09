@@ -183,7 +183,7 @@ func (m *Manager) render() {
 	fmt.Println()
 
 	// Results summary
-	fmt.Printf("  Results: ✅ %d passed | ❌ %d failed | ⏳ %d pending\n",
+	fmt.Printf("  Results: ✓ %d passed | ✗ %d failed | ○ %d pending\n",
 		m.passed, m.failed, m.totalTests-m.completed)
 	fmt.Println()
 

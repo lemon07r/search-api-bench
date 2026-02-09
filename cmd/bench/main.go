@@ -36,6 +36,8 @@ type cliFlags struct {
 	debugMode     *bool
 	debugFullMode *bool
 	quickMode     *bool
+	searchOnly    *bool
+	noSearch      *bool
 }
 
 func parseFlags() *cliFlags {
@@ -49,6 +51,8 @@ func parseFlags() *cliFlags {
 		debugMode:     flag.Bool("debug", false, "Enable debug logging with request/response data"),
 		debugFullMode: flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
 		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
+		searchOnly:    flag.Bool("search-only", false, "Run only search tests"),
+		noSearch:      flag.Bool("no-search", false, "Exclude search tests"),
 	}
 }
 
@@ -91,6 +95,19 @@ func main() {
 		cfg = applyQuickMode(cfg)
 	}
 
+	// Validate and apply test type filters
+	if *flags.searchOnly && *flags.noSearch {
+		fmt.Fprintf(os.Stderr, "Error: cannot use both -search-only and -no-search flags\n")
+		os.Exit(1)
+	}
+
+	cfg.Tests = filterTests(cfg.Tests, *flags.searchOnly, *flags.noSearch)
+
+	if len(cfg.Tests) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no tests match the specified filters\n")
+		os.Exit(1)
+	}
+
 	finalOutputDir, err := ensureOutputDir(cfg.General.OutputDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
@@ -107,6 +124,14 @@ func main() {
 	if *flags.quickMode {
 		fmt.Println("⚡ Quick mode enabled: running subset of tests with reduced parameters")
 		fmt.Printf("   Tests: %d | Timeout: %s\n\n", len(cfg.Tests), cfg.General.Timeout)
+	}
+
+	if *flags.searchOnly {
+		fmt.Printf("🔍 Search-only mode: running %d search tests\n\n", len(cfg.Tests))
+	}
+
+	if *flags.noSearch {
+		fmt.Printf("🚫 No-search mode: running %d non-search tests\n\n", len(cfg.Tests))
 	}
 
 	if enableDebug {
@@ -339,6 +364,24 @@ func ensureOutputDir(baseDir string) (string, error) {
 	}
 
 	return sessionDir, nil
+}
+
+// filterTests filters tests based on search-only and no-search flags
+func filterTests(tests []config.TestConfig, searchOnly, noSearch bool) []config.TestConfig {
+	if !searchOnly && !noSearch {
+		return tests
+	}
+
+	var filtered []config.TestConfig
+	for _, test := range tests {
+		switch {
+		case searchOnly && test.Type == "search":
+			filtered = append(filtered, test)
+		case noSearch && test.Type != "search":
+			filtered = append(filtered, test)
+		}
+	}
+	return filtered
 }
 
 // applyQuickMode modifies the configuration for quick testing
