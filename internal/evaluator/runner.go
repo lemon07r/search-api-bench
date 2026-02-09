@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -202,8 +203,15 @@ func (r *Runner) GetCollector() *metrics.Collector {
 	return r.collector
 }
 
-// EnsureOutputDir creates the output directory if it doesn't exist
+// EnsureOutputDir creates a timestamped session subdirectory for results
 func (r *Runner) EnsureOutputDir() error {
+	// Create a timestamped subdirectory for this session
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	sessionDir := filepath.Join(r.config.General.OutputDir, timestamp)
+
+	// Update config to use the session directory for this run
+	r.config.General.OutputDir = sessionDir
+
 	// #nosec G301 - 0750 is more restrictive than 0755 but still allows owner/group access
-	return os.MkdirAll(r.config.General.OutputDir, 0750)
+	return os.MkdirAll(sessionDir, 0750)
 }

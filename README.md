@@ -127,15 +127,17 @@ git push origin v1.0.0
 ## API Pricing Reference
 
 ### Firecrawl
-- Free tier: 500 credits/month
-- Paid plans start at $16/month
+- Free tier: 500 credits (one-time)
+- Hobby: $16/month (3,000 credits)
+- Standard: $83/month (100,000 credits)
 - Search: 1 credit per request
 - Scrape: 1 credit per page
 - Crawl: 1 credit per page
 
 ### Tavily
 - Free tier: 1,000 credits/month
-- Paid plans start at $30/month
+- Project: $30/month (4,000 credits)
+- Pay-as-you-go: $0.008 per credit
 - Basic Search: 1 credit per request
 - Advanced Search: 2 credits per request
 - Extract: 1 credit per 5 successful extractions

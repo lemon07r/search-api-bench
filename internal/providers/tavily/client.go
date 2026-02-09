@@ -57,6 +57,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	}
 
 	payload := map[string]interface{}{
+		"api_key":        c.apiKey,
 		"query":          query,
 		"search_depth":   searchDepth,
 		"max_results":    opts.MaxResults,
@@ -140,7 +141,8 @@ func (c *Client) Extract(ctx context.Context, url string, _ providers.ExtractOpt
 	start := time.Now()
 
 	payload := map[string]interface{}{
-		"urls": []string{url},
+		"api_key": c.apiKey,
+		"urls":    []string{url},
 	}
 
 	body, err := json.Marshal(payload)
@@ -205,8 +207,9 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 
 	// First, use Tavily Map to get URLs
 	payload := map[string]interface{}{
-		"url":   url,
-		"limit": opts.MaxPages,
+		"api_key": c.apiKey,
+		"url":     url,
+		"limit":   opts.MaxPages,
 	}
 
 	body, err := json.Marshal(payload)
