@@ -29,10 +29,12 @@ const (
 	readerBaseURL  = "https://r.jina.ai"
 	searchBaseURL  = "https://s.jina.ai"
 	apiBaseURL     = "https://api.jina.ai"
-	defaultTimeout = 60 * time.Second
+	defaultTimeout = 30 * time.Second
 	// MaxExtractCredits caps the credits for extract to prevent inflated numbers
 	// Jina bills by tokens (chars/4), but we cap at 100 for fair comparison
 	MaxExtractCredits = 100
+	// BaseSearchCredits is the base cost per search request
+	BaseSearchCredits = 1000
 )
 
 // Client represents a Jina AI API client
@@ -55,12 +57,24 @@ func NewClient() (*Client, error) {
 		}
 	}
 
+	// Use conservative retry config to avoid burning credits on retries
+	retryCfg := providers.RetryConfig{
+		MaxRetries:     1, // Reduce from 3 to 1 to limit credit usage on failures
+		InitialBackoff: 500 * time.Millisecond,
+		MaxBackoff:     5 * time.Second,
+		BackoffFactor:  2.0,
+		RetryableErrors: []int{
+			http.StatusTooManyRequests, // 429
+			http.StatusServiceUnavailable, // 503
+		},
+	}
+
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
-		retryCfg: providers.DefaultRetryConfig(),
+		retryCfg: retryCfg,
 	}, nil
 }
 
@@ -193,16 +207,22 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 
 	// Convert Jina results to provider format
 	items := make([]providers.SearchItem, 0, len(result.Data))
+	totalContentLen := 0
 	for _, r := range result.Data {
 		items = append(items, providers.SearchItem{
 			Title:   r.Title,
 			URL:     r.URL,
 			Content: r.Content,
 		})
+		totalContentLen += len(r.Title) + len(r.Content)
 	}
 
-	// Jina Search costs 10,000 tokens per request (fixed)
-	creditsUsed := 10000
+	// Jina Search bills by tokens (~4 chars per token) + base request cost
+	// Use actual content length for more accurate credit estimation
+	creditsUsed := BaseSearchCredits + (totalContentLen / 4)
+	if creditsUsed > 10000 {
+		creditsUsed = 10000 // Cap at 10k to match Jina's typical max
+	}
 
 	return &providers.SearchResult{
 		Query:        query,
@@ -367,83 +387,14 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 }
 
 // Crawl crawls a website using Jina AI
-// Since Jina doesn't have native crawl, we simulate it via:
-// 1. Search for site:domain.com to discover URLs
-// 2. Extract each discovered URL
+// Note: Jina doesn't have a native crawl API. We only extract the single starting URL
+// to avoid burning through API quota with N+1 search+extract calls.
 func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
 
-	// Parse URL to get domain
-	parsedURL, err := url.Parse(startURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
-	}
-
-	if parsedURL.Scheme == "" {
-		parsedURL.Scheme = "https"
-	}
-
-	domain := parsedURL.Host
-
-	// Step 1: Search for pages on this domain
-	searchQuery := fmt.Sprintf("site:%s", domain)
-	searchOpts := providers.DefaultSearchOptions()
-	searchOpts.MaxResults = opts.MaxPages
-
-	searchResult, err := c.Search(ctx, searchQuery, searchOpts)
-	if err != nil {
-		// Fallback: just extract the starting URL
-		return c.crawlSinglePage(ctx, startURL, opts, start)
-	}
-
-	// Step 2: Extract each discovered URL
-	pages := make([]providers.CrawledPage, 0, opts.MaxPages)
-	creditsUsed := searchResult.CreditsUsed
-	extractOpts := providers.DefaultExtractOptions()
-
-	for _, item := range searchResult.Results {
-		if len(pages) >= opts.MaxPages {
-			break
-		}
-
-		// Skip if not same domain
-		itemURL, err := url.Parse(item.URL)
-		if err != nil {
-			continue
-		}
-		if itemURL.Host != domain {
-			continue
-		}
-
-		extractResult, err := c.Extract(ctx, item.URL, extractOpts)
-		if err != nil {
-			continue // Skip failed extractions
-		}
-
-		pages = append(pages, providers.CrawledPage{
-			URL:      item.URL,
-			Title:    extractResult.Title,
-			Content:  extractResult.Content,
-			Markdown: extractResult.Markdown,
-		})
-
-		creditsUsed += extractResult.CreditsUsed
-	}
-
-	// If no pages were extracted, fallback to single page
-	if len(pages) == 0 {
-		return c.crawlSinglePage(ctx, startURL, opts, start)
-	}
-
-	latency := time.Since(start)
-
-	return &providers.CrawlResult{
-		URL:         startURL,
-		Pages:       pages,
-		TotalPages:  len(pages),
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
-	}, nil
+	// Jina doesn't support native crawling - only extract the starting URL
+	// This prevents excessive API usage from the N+1 search+extract pattern
+	return c.crawlSinglePage(ctx, startURL, opts, start)
 }
 
 // crawlSinglePage is a fallback that just extracts the starting URL
@@ -561,12 +512,18 @@ func (c *Client) parsePlainTextSearchResponse(query, text string, startTime time
 		},
 	}
 
+	// Calculate credits based on actual content length
+	creditsUsed := BaseSearchCredits + (len(text) / 4)
+	if creditsUsed > 10000 {
+		creditsUsed = 10000
+	}
+
 	return &providers.SearchResult{
 		Query:        query,
 		Results:      items,
 		TotalResults: len(items),
 		Latency:      latency,
-		CreditsUsed:  10000,
+		CreditsUsed:  creditsUsed,
 	}, nil
 }
 
