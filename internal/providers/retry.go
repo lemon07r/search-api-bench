@@ -184,6 +184,7 @@ func (rc *RetryConfig) isRetryable(err error) bool {
 	// Network/transient error indicators
 	transientIndicators := []string{
 		"timeout",
+		"deadline exceeded",
 		"connection refused",
 		"no such host",
 		"temporary",

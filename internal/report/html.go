@@ -63,6 +63,7 @@ func (g *Generator) GenerateHTML() error {
         .provider-local { background: #1abc9c; color: white; }
         .section { margin-bottom: 40px; }
         h2 { color: #2c3e50; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #3498db; }
+        .quality-note { color: #666; margin: -8px 0 16px; font-size: 0.9em; }
         .advanced-section { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; margin: 40px 0 30px 0; border-radius: 8px; }
         .advanced-section h2 { color: white; border-bottom: 2px solid rgba(255,255,255,0.3); margin-bottom: 5px; }
         .advanced-subtitle { font-size: 0.9em; opacity: 0.9; }
@@ -145,7 +146,7 @@ func (g *Generator) GenerateHTML() error {
             </div>
         </div>
 
-` + g.generateQualitySection() + g.generateAdvancedAnalyticsSection() + `
+` + g.generateQualitySection() + g.generateQualityByTestTypeSection() + g.generateAdvancedAnalyticsSection() + `
         <div class="section">
             <h2>Detailed Results</h2>
             <table>
@@ -218,12 +219,66 @@ func (g *Generator) generateQualitySection() string {
 		return ""
 	}
 	return `        <div class="section">
-            <h2>AI Quality Score (Embedding + Reranker)</h2>
+            <h2>AI Quality Score</h2>
+            <p class="quality-note">Search quality uses semantic + reranker signals. Extract and crawl use heuristic quality metrics. Raw quality averages only scored tests.</p>
             <div class="chart-container">
                 <div class="chart-wrapper">
                     <canvas id="qualityChart"></canvas>
                 </div>
             </div>
+        </div>
+
+`
+}
+
+func (g *Generator) generateQualityByTestTypeSection() string {
+	if !g.hasQualityScores() {
+		return ""
+	}
+
+	var rows strings.Builder
+	for _, provider := range g.collector.GetAllProviders() {
+		byType := g.computeProviderQualityByTestType(provider)
+		rows.WriteString(fmt.Sprintf(`
+                    <tr>
+                        <td><span class="provider-badge provider-%s">%s</span></td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                    </tr>`,
+			provider,
+			capitalize(provider),
+			formatQualityValue(byType.Search),
+			formatQualityCoverage(byType.Search),
+			formatQualityValue(byType.Extract),
+			formatQualityCoverage(byType.Extract),
+			formatQualityValue(byType.Crawl),
+			formatQualityCoverage(byType.Crawl),
+		))
+	}
+
+	return `
+        <div class="section">
+            <h2>Quality by Test Type</h2>
+            <p class="quality-note">Search quality uses semantic/reranker signals; extract and crawl quality use heuristic scoring.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Provider</th>
+                        <th>Search Quality</th>
+                        <th>Search Coverage</th>
+                        <th>Extract Quality</th>
+                        <th>Extract Coverage</th>
+                        <th>Crawl Quality</th>
+                        <th>Crawl Coverage</th>
+                    </tr>
+                </thead>
+                <tbody>` + rows.String() + `
+                </tbody>
+            </table>
         </div>
 
 `
@@ -334,6 +389,7 @@ func (g *Generator) generateChartScripts() string {
 	avgLatencies := make([]float64, len(providers))
 	successRates := make([]float64, len(providers))
 	avgQualityScores := make([]float64, len(providers))
+	reliabilityAdjustedQuality := make([]float64, len(providers))
 	// USD cost metrics
 	totalCostUSD := make([]float64, len(providers))
 
@@ -351,6 +407,7 @@ func (g *Generator) generateChartScripts() string {
 		avgLatencies[i] = float64(summary.AvgLatency.Milliseconds())
 		successRates[i] = summary.SuccessRate
 		avgQualityScores[i] = summary.AvgQualityScore
+		reliabilityAdjustedQuality[i] = summary.ReliabilityAdjustedQuality
 		// USD cost metrics
 		totalCostUSD[i] = summary.TotalCostUSD
 	}
@@ -363,19 +420,27 @@ func (g *Generator) generateChartScripts() string {
             type: 'bar',
             data: {
                 labels: [%s],
-                datasets: [{
-                    label: 'Average Quality Score',
-                    data: [%s],
-                    backgroundColor: [%s],
-                    borderRadius: 4
-                }]
+                datasets: [
+                    {
+                        label: 'Raw Avg Quality (scored tests only)',
+                        data: [%s],
+                        backgroundColor: [%s],
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'Reliability-Adjusted Quality',
+                        data: [%s],
+                        backgroundColor: 'rgba(44, 62, 80, 0.65)',
+                        borderRadius: 4
+                    }
+                ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { display: false },
-                    title: { display: true, text: 'AI Quality Score (0-100, higher is better)' }
+                    legend: { display: true, position: 'bottom' },
+                    title: { display: true, text: 'Quality (raw vs reliability-adjusted)' }
                 },
                 scales: {
                     y: {
@@ -386,7 +451,7 @@ func (g *Generator) generateChartScripts() string {
                 }
             }
         });
-`, joinStrings(providerNames), formatFloatSlice(avgQualityScores), joinStrings(colors))
+`, joinStrings(providerNames), formatFloatSlice(avgQualityScores), joinStrings(colors), formatFloatSlice(reliabilityAdjustedQuality))
 	}
 
 	advancedScripts := g.generateAdvancedChartScripts(providers, providerNames, colors, baseColors)

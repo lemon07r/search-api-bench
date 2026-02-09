@@ -373,11 +373,54 @@ func TestGenerateMarkdown_IncludesReliabilityAdjustedQualityLeaderboard(t *testi
 
 	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.md"))
 	report := string(content)
-	if !strings.Contains(report, "Quality Score (by AI evaluation - higher is better):") {
-		t.Fatal("expected classic quality ranking section")
+	if !strings.Contains(report, "Raw Quality Score (scored tests only):") {
+		t.Fatal("expected raw quality ranking section")
 	}
 	if !strings.Contains(report, "Reliability-Adjusted Quality (quality x success x coverage):") {
 		t.Fatal("expected reliability-adjusted quality section")
+	}
+}
+
+func TestGenerateMarkdown_IncludesQualityByTestTypeSection(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:     "Search",
+		Provider:     "provider1",
+		TestType:     "search",
+		Success:      true,
+		QualityScore: 70,
+	})
+	c.AddResult(metrics.Result{
+		TestName:     "Extract",
+		Provider:     "provider1",
+		TestType:     "extract",
+		Success:      true,
+		QualityScore: 90,
+	})
+	c.AddResult(metrics.Result{
+		TestName:     "Crawl",
+		Provider:     "provider1",
+		TestType:     "crawl",
+		Success:      false,
+		QualityScore: 0,
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateMarkdown(); err != nil {
+		t.Fatalf("GenerateMarkdown failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.md"))
+	report := string(content)
+	if !strings.Contains(report, "### Quality by Test Type") {
+		t.Fatal("expected quality by test type section")
+	}
+	if !strings.Contains(report, "| Provider | Search Quality | Search Coverage | Extract Quality | Extract Coverage | Crawl Quality | Crawl Coverage |") {
+		t.Fatal("expected quality by test type table header")
+	}
+	if !strings.Contains(report, "| provider1 | 70.0 | 100.0% (1/1) | 90.0 | 100.0% (1/1) | - | 0.0% (0/1) |") {
+		t.Fatal("expected provider quality breakdown row")
 	}
 }
 
@@ -403,6 +446,62 @@ func TestGenerateJSON_WritesFile(t *testing.T) {
 	_, err = os.Stat(filepath.Join(tmpDir, "report.json"))
 	if err != nil {
 		t.Errorf("report.json was not created: %v", err)
+	}
+}
+
+func TestGenerateJSON_IncludesQualityByTestType(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:     "Search",
+		Provider:     "provider1",
+		TestType:     "search",
+		Success:      true,
+		QualityScore: 88,
+	})
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+
+	if err := gen.GenerateJSON(); err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "report.json"))
+	if err != nil {
+		t.Fatalf("failed to read report: %v", err)
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf("failed to unmarshal report JSON: %v", err)
+	}
+	if _, ok := payload["quality_by_test_type"]; !ok {
+		t.Fatal("expected quality_by_test_type in JSON report")
+	}
+}
+
+func TestGenerateHTML_IncludesQualityByTestTypeSection(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:     "Search",
+		Provider:     "provider1",
+		TestType:     "search",
+		Success:      true,
+		QualityScore: 75,
+	})
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+
+	if err := gen.GenerateHTML(); err != nil {
+		t.Fatalf("GenerateHTML failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.html"))
+	html := string(content)
+	if !strings.Contains(html, "Quality by Test Type") {
+		t.Fatal("expected quality by test type section in HTML")
+	}
+	if !strings.Contains(html, "Search Quality") || !strings.Contains(html, "Extract Quality") || !strings.Contains(html, "Crawl Quality") {
+		t.Fatal("expected quality by type columns in HTML")
 	}
 }
 

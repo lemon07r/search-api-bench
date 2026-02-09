@@ -30,7 +30,8 @@ const (
 	apiBaseURL     = "https://api.jina.ai"
 	defaultTimeout = 30 * time.Second
 	// defaultSearchTimeout bounds each individual search attempt.
-	defaultSearchTimeout = 12 * time.Second
+	// Jina search can legitimately take >12s for some queries.
+	defaultSearchTimeout = 18 * time.Second
 	// MaxExtractCredits caps the credits for extract to prevent inflated numbers
 	// Jina bills by tokens (chars/4), but we cap at 100 for fair comparison
 	MaxExtractCredits = 100
