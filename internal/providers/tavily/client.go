@@ -97,20 +97,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	items := make([]providers.SearchItem, 0, len(result.Results))
 	for _, r := range result.Results {
@@ -139,7 +139,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
-		RawResponse:  respBody,
+		RawResponse:  resp.Body,
 	}, nil
 }
 
@@ -178,20 +178,20 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, err
 	}
 
 	var result extractResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal extract response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	if len(result.Results) == 0 {
 		return nil, fmt.Errorf("no extraction results returned")
@@ -244,19 +244,19 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	// Some Tavily endpoints require Authorization header in addition to api_key in body
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "map request failed")
 		return nil, err
 	}
 
 	var mapResult mapResponse
-	if err := json.Unmarshal(respBody, &mapResult); err != nil {
+	if err := json.Unmarshal(resp.Body, &mapResult); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal map response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), time.Since(start))
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), time.Since(start))
 
 	pages := make([]providers.CrawledPage, 0, len(mapResult.Results))
 	creditsUsed := 1 // Map API cost

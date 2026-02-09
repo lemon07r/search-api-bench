@@ -116,20 +116,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	// Convert Exa results to provider format
 	items := make([]providers.SearchItem, 0, len(result.Results))
@@ -160,7 +160,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
-		RawResponse:  respBody,
+		RawResponse:  resp.Body,
 	}, nil
 }
 
@@ -199,20 +199,20 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, err
 	}
 
 	var result contentsResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal extract response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	if len(result.Results) == 0 {
 		return nil, fmt.Errorf("no extraction results returned")
@@ -364,13 +364,13 @@ func (c *Client) extractBatch(ctx context.Context, urls []string) ([]providers.C
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	var result contentsResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		return nil, 0, err
 	}
 

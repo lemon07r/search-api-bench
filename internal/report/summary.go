@@ -180,6 +180,8 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 		faster := providers[0]
 		if summary2.AvgLatency < summary1.AvgLatency {
 			faster = providers[1]
+		}
+		if speedDiff < 0 {
 			speedDiff = -speedDiff
 		}
 		fmt.Fprintf(sb, "- **%s** is %.1f%% faster on average\n", faster, speedDiff)
@@ -193,6 +195,8 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 		cheaper := providers[0]
 		if summary2.TotalCostUSD < summary1.TotalCostUSD {
 			cheaper = providers[1]
+		}
+		if costDiff < 0 {
 			costDiff = -costDiff
 		}
 		fmt.Fprintf(sb, "- **%s** is %.1f%% cheaper\n", cheaper, costDiff)
@@ -206,6 +210,8 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 		moreContent := providers[0]
 		if summary2.AvgContentLength > summary1.AvgContentLength {
 			moreContent = providers[1]
+		}
+		if contentDiff < 0 {
 			contentDiff = -contentDiff
 		}
 		fmt.Fprintf(sb, "- **%s** returns %.1f%% more content on average\n", moreContent, contentDiff)
@@ -220,6 +226,8 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 		betterQuality := providers[0]
 		if summary2.AvgQualityScore > summary1.AvgQualityScore {
 			betterQuality = providers[1]
+		}
+		if qualityDiff < 0 {
 			qualityDiff = -qualityDiff
 		}
 		fmt.Fprintf(sb, "- **%s** has %.1f points higher quality score\n", betterQuality, qualityDiff)

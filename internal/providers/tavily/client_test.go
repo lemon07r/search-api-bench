@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/search-api-bench/internal/providers/testutil"
 )
 
 func TestNewClient_MissingAPIKey(t *testing.T) {
@@ -34,7 +34,7 @@ func TestNewClient_WithAPIKey(t *testing.T) {
 }
 
 func TestSearch_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {
 			t.Errorf("expected path /search, got %s", r.URL.Path)
 		}
@@ -107,7 +107,7 @@ func TestSearch_Success(t *testing.T) {
 }
 
 func TestSearch_BasicCredits(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := searchResponse{Results: []struct {
 			Title         string  `json:"title"`
 			URL           string  `json:"url"`
@@ -140,7 +140,7 @@ func TestSearch_BasicCredits(t *testing.T) {
 }
 
 func TestSearch_AdvancedCredits(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := searchResponse{Results: []struct {
 			Title         string  `json:"title"`
 			URL           string  `json:"url"`
@@ -174,7 +174,7 @@ func TestSearch_AdvancedCredits(t *testing.T) {
 
 func TestSearch_WithTimeRange(t *testing.T) {
 	var capturedReq map[string]interface{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&capturedReq)
 		response := searchResponse{Results: []struct {
 			Title         string  `json:"title"`
@@ -209,7 +209,7 @@ func TestSearch_WithTimeRange(t *testing.T) {
 
 func TestSearch_WithImages(t *testing.T) {
 	var capturedReq map[string]interface{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&capturedReq)
 		response := searchResponse{Results: []struct {
 			Title         string  `json:"title"`
@@ -243,7 +243,7 @@ func TestSearch_WithImages(t *testing.T) {
 }
 
 func TestSearch_DateParsing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := searchResponse{
 			Results: []struct {
 				Title         string  `json:"title"`
@@ -287,7 +287,7 @@ func TestSearch_DateParsing(t *testing.T) {
 }
 
 func TestSearch_InvalidDate(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := searchResponse{
 			Results: []struct {
 				Title         string  `json:"title"`
@@ -327,7 +327,7 @@ func TestSearch_InvalidDate(t *testing.T) {
 }
 
 func TestSearch_HTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error": "invalid api key"}`))
 	}))
@@ -346,7 +346,7 @@ func TestSearch_HTTPError(t *testing.T) {
 }
 
 func TestSearch_InvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{invalid`))
 	}))
@@ -365,7 +365,7 @@ func TestSearch_InvalidJSON(t *testing.T) {
 }
 
 func TestExtract_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/extract" {
 			t.Errorf("expected path /extract, got %s", r.URL.Path)
 		}
@@ -414,7 +414,7 @@ func TestExtract_Success(t *testing.T) {
 }
 
 func TestExtract_NoResults(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := extractResponse{
 			Results: []struct {
 				URL        string   `json:"url"`
@@ -445,7 +445,7 @@ func TestExtract_NoResults(t *testing.T) {
 }
 
 func TestExtract_PartialFail(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := extractResponse{
 			Results: []struct {
 				URL        string   `json:"url"`
@@ -492,7 +492,7 @@ func TestExtract_PartialFail(t *testing.T) {
 }
 
 func TestCrawl_MapSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/map":
 			response := mapResponse{
@@ -546,7 +546,7 @@ func TestCrawl_MapSuccess(t *testing.T) {
 }
 
 func TestCrawl_RespectsMaxPages(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/map":
 			response := mapResponse{
@@ -602,7 +602,7 @@ func TestCrawl_RespectsMaxPages(t *testing.T) {
 }
 
 func TestCrawl_EmptyMap(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/map" {
 			response := mapResponse{
 				Results: []string{},

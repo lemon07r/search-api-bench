@@ -5,16 +5,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/search-api-bench/internal/providers/testutil"
 )
 
 // setupTestServer creates a mock HTTP server for testing
-func setupTestServer() *httptest.Server {
+func setupTestServer(tb testing.TB) *testutil.Server {
 	mux := http.NewServeMux()
 
 	// Home page
@@ -84,7 +84,7 @@ func setupTestServer() *httptest.Server {
 		fmt.Fprint(w, "Not Found")
 	})
 
-	return httptest.NewServer(mux)
+	return testutil.NewIPv4Server(tb, mux)
 }
 
 func TestNewClient(t *testing.T) {
@@ -117,7 +117,7 @@ func TestClientSearch(t *testing.T) {
 }
 
 func TestClientExtract(t *testing.T) {
-	server := setupTestServer()
+	server := setupTestServer(t)
 	defer server.Close()
 
 	client, _ := NewClient()
@@ -174,7 +174,7 @@ func TestClientExtract(t *testing.T) {
 }
 
 func TestClientExtractContextCancellation(t *testing.T) {
-	server := setupTestServer()
+	server := setupTestServer(t)
 	defer server.Close()
 
 	client, _ := NewClient()
@@ -203,7 +203,7 @@ func TestClientExtractInvalidURL(t *testing.T) {
 }
 
 func TestClientCrawl(t *testing.T) {
-	server := setupTestServer()
+	server := setupTestServer(t)
 	defer server.Close()
 
 	client, _ := NewClient()
@@ -250,7 +250,7 @@ func TestClientCrawl(t *testing.T) {
 }
 
 func TestClientCrawlMaxPages(t *testing.T) {
-	server := setupTestServer()
+	server := setupTestServer(t)
 	defer server.Close()
 
 	client, _ := NewClient()
@@ -278,7 +278,7 @@ func TestClientCrawlMaxPages(t *testing.T) {
 }
 
 func TestClientCrawlZeroDepthReturnsStartPageOnly(t *testing.T) {
-	server := setupTestServer()
+	server := setupTestServer(t)
 	defer server.Close()
 
 	client, _ := NewClient()
@@ -306,7 +306,7 @@ func TestClientCrawlZeroDepthReturnsStartPageOnly(t *testing.T) {
 }
 
 func TestClientCrawlContextTimeout(t *testing.T) {
-	server := setupTestServer()
+	server := setupTestServer(t)
 	defer server.Close()
 
 	client, _ := NewClient()
@@ -365,7 +365,7 @@ func TestCleanMarkdown(t *testing.T) {
 }
 
 func BenchmarkClientExtract(b *testing.B) {
-	server := setupTestServer()
+	server := setupTestServer(b)
 	defer server.Close()
 
 	client, _ := NewClient()

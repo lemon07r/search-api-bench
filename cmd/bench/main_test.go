@@ -10,7 +10,10 @@ import (
 )
 
 func TestParseProviders_All(t *testing.T) {
-	result := parseProviders("all", false)
+	result, err := parseProviders("all", false)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
 	if len(result) != 7 {
 		t.Errorf("expected 7 providers for 'all', got %d", len(result))
 	}
@@ -23,7 +26,10 @@ func TestParseProviders_All(t *testing.T) {
 }
 
 func TestParseProviders_Single(t *testing.T) {
-	result := parseProviders("firecrawl", false)
+	result, err := parseProviders("firecrawl", false)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("expected 1 provider, got %d", len(result))
 	}
@@ -33,7 +39,10 @@ func TestParseProviders_Single(t *testing.T) {
 }
 
 func TestParseProviders_List(t *testing.T) {
-	result := parseProviders("firecrawl,tavily", false)
+	result, err := parseProviders("firecrawl,tavily", false)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
 	if len(result) != 2 {
 		t.Errorf("expected 2 providers, got %d", len(result))
 	}
@@ -43,17 +52,34 @@ func TestParseProviders_List(t *testing.T) {
 }
 
 func TestParseProviders_Empty(t *testing.T) {
-	result := parseProviders("", false)
-	if len(result) != 1 {
-		t.Errorf("expected 1 element for empty string, got %d", len(result))
+	_, err := parseProviders("", false)
+	if err == nil {
+		t.Fatal("expected error for empty providers")
 	}
-	if result[0] != "" {
-		t.Errorf("expected empty string, got %s", result[0])
+}
+
+func TestParseProviders_Invalid(t *testing.T) {
+	_, err := parseProviders("firecrawl,unknown", false)
+	if err == nil {
+		t.Fatal("expected error for invalid provider")
+	}
+}
+
+func TestParseProviders_NoLocalFilter(t *testing.T) {
+	result, err := parseProviders("local,firecrawl,local", true)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
+	if len(result) != 1 || result[0] != "firecrawl" {
+		t.Fatalf("expected [firecrawl], got %v", result)
 	}
 }
 
 func TestParseFormats_All(t *testing.T) {
-	result := parseFormats("all")
+	result, err := parseFormats("all")
+	if err != nil {
+		t.Fatalf("parseFormats returned error: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("expected 1 element for 'all', got %d", len(result))
 	}
@@ -63,7 +89,10 @@ func TestParseFormats_All(t *testing.T) {
 }
 
 func TestParseFormats_Single(t *testing.T) {
-	result := parseFormats("html")
+	result, err := parseFormats("html")
+	if err != nil {
+		t.Fatalf("parseFormats returned error: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("expected 1 format, got %d", len(result))
 	}
@@ -73,7 +102,10 @@ func TestParseFormats_Single(t *testing.T) {
 }
 
 func TestParseFormats_List(t *testing.T) {
-	result := parseFormats("html,md,json")
+	result, err := parseFormats("html,md,json")
+	if err != nil {
+		t.Fatalf("parseFormats returned error: %v", err)
+	}
 	if len(result) != 3 {
 		t.Errorf("expected 3 formats, got %d", len(result))
 	}
@@ -82,6 +114,20 @@ func TestParseFormats_List(t *testing.T) {
 		if result[i] != exp {
 			t.Errorf("expected %s at index %d, got %s", exp, i, result[i])
 		}
+	}
+}
+
+func TestParseFormats_Invalid(t *testing.T) {
+	_, err := parseFormats("html,xml")
+	if err == nil {
+		t.Fatal("expected error for invalid format")
+	}
+}
+
+func TestParseFormats_AllWithOthers(t *testing.T) {
+	_, err := parseFormats("all,html")
+	if err == nil {
+		t.Fatal("expected error when combining all with other formats")
 	}
 }
 

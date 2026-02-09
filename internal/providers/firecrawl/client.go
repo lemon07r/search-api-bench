@@ -95,20 +95,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	items := make([]providers.SearchItem, 0, len(result.Data))
 	for _, d := range result.Data {
@@ -125,7 +125,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  1, // Firecrawl search uses 1 credit per request
-		RawResponse:  respBody,
+		RawResponse:  resp.Body,
 	}, nil
 }
 
@@ -163,20 +163,20 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, err
 	}
 
 	var result scrapeResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal extract response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	return &providers.ExtractResult{
 		URL:         url,
@@ -227,14 +227,14 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "crawl request failed")
 		return nil, err
 	}
 
 	var result crawlResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal crawl response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
@@ -245,7 +245,7 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	pages := make([]providers.CrawledPage, 0, len(result.Data))
 	for _, d := range result.Data {
@@ -282,13 +282,13 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 		}
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-		body, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+		resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 		if err != nil {
 			return nil, fmt.Errorf("status request failed: %w", err)
 		}
 
 		var status crawlStatusResponse
-		if err := json.Unmarshal(body, &status); err != nil {
+		if err := json.Unmarshal(resp.Body, &status); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal status response: %w", err)
 		}
 

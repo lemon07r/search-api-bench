@@ -111,6 +111,24 @@ func TestCollector_GetAllProviders(t *testing.T) {
 	}
 }
 
+func TestCollector_GetAllProviders_Sorted(t *testing.T) {
+	c := NewCollector()
+	c.AddResult(Result{Provider: "zeta"})
+	c.AddResult(Result{Provider: "alpha"})
+	c.AddResult(Result{Provider: "mid"})
+
+	providers := c.GetAllProviders()
+	expected := []string{"alpha", "mid", "zeta"}
+	if len(providers) != len(expected) {
+		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
+	}
+	for i := range expected {
+		if providers[i] != expected[i] {
+			t.Fatalf("expected providers[%d]=%q, got %q", i, expected[i], providers[i])
+		}
+	}
+}
+
 func TestCollector_GetAllTests(t *testing.T) {
 	c := NewCollector()
 
@@ -121,6 +139,24 @@ func TestCollector_GetAllTests(t *testing.T) {
 	tests := c.GetAllTests()
 	if len(tests) != 2 {
 		t.Errorf("expected 2 unique tests, got %d", len(tests))
+	}
+}
+
+func TestCollector_GetAllTests_Sorted(t *testing.T) {
+	c := NewCollector()
+	c.AddResult(Result{TestName: "test-z"})
+	c.AddResult(Result{TestName: "test-a"})
+	c.AddResult(Result{TestName: "test-m"})
+
+	tests := c.GetAllTests()
+	expected := []string{"test-a", "test-m", "test-z"}
+	if len(tests) != len(expected) {
+		t.Fatalf("expected %d tests, got %d", len(expected), len(tests))
+	}
+	for i := range expected {
+		if tests[i] != expected[i] {
+			t.Fatalf("expected tests[%d]=%q, got %q", i, expected[i], tests[i])
+		}
 	}
 }
 
@@ -160,6 +196,28 @@ func TestComputeSummary_SingleResult(t *testing.T) {
 	}
 	if summary.MinLatency != 100*time.Millisecond || summary.MaxLatency != 100*time.Millisecond {
 		t.Errorf("expected min=max=100ms, got min=%v max=%v", summary.MinLatency, summary.MaxLatency)
+	}
+}
+
+func TestComputeSummary_UsesMeasuredCostUSDWhenPresent(t *testing.T) {
+	c := NewCollector()
+	c.AddResult(Result{
+		Provider:      "firecrawl",
+		TestType:      "search",
+		Success:       true,
+		Latency:       100 * time.Millisecond,
+		CreditsUsed:   3,
+		ContentLength: 500,
+		ResultsCount:  5,
+		CostUSD:       1.2345,
+	})
+
+	summary := c.ComputeSummary("firecrawl")
+	if summary.TotalCostUSD != 1.2345 {
+		t.Fatalf("expected measured total cost 1.2345, got %.4f", summary.TotalCostUSD)
+	}
+	if summary.AvgCostPerReq != 1.2345 {
+		t.Fatalf("expected measured avg cost 1.2345, got %.4f", summary.AvgCostPerReq)
 	}
 }
 

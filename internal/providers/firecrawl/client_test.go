@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/search-api-bench/internal/providers/testutil"
 )
 
 func TestNewClient_MissingAPIKey(t *testing.T) {
@@ -34,7 +34,7 @@ func TestNewClient_WithAPIKey(t *testing.T) {
 }
 
 func TestSearch_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {
 			t.Errorf("expected path /search, got %s", r.URL.Path)
 		}
@@ -96,7 +96,7 @@ func TestSearch_Success(t *testing.T) {
 }
 
 func TestSearch_HTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "internal error"}`))
 	}))
@@ -117,7 +117,7 @@ func TestSearch_HTTPError(t *testing.T) {
 }
 
 func TestSearch_InvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{invalid json`))
 	}))
@@ -138,7 +138,7 @@ func TestSearch_InvalidJSON(t *testing.T) {
 }
 
 func TestSearch_EmptyResults(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := searchResponse{
 			Success: true,
 			Data: []struct {
@@ -176,7 +176,7 @@ func TestSearch_EmptyResults(t *testing.T) {
 }
 
 func TestExtract_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/scrape" {
 			t.Errorf("expected path /scrape, got %s", r.URL.Path)
 		}
@@ -232,7 +232,7 @@ func TestExtract_Success(t *testing.T) {
 }
 
 func TestExtract_NotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"error": "not found"}`))
 	}))
@@ -253,7 +253,7 @@ func TestExtract_NotFound(t *testing.T) {
 }
 
 func TestCrawl_SyncSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/crawl" {
 			// Return immediate completion (no ID)
 			response := crawlResponse{
@@ -322,7 +322,7 @@ func TestCrawl_SyncSuccess(t *testing.T) {
 
 func TestCrawl_AsyncPolling(t *testing.T) {
 	callCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/crawl" {
 			// Initial request - return ID
 			w.Header().Set("Content-Type", "application/json")
@@ -386,7 +386,7 @@ func TestCrawl_AsyncPolling(t *testing.T) {
 }
 
 func TestCrawl_AsyncFailed(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/crawl" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"success": true, "id": "crawl-456"}`))
@@ -415,7 +415,7 @@ func TestCrawl_AsyncFailed(t *testing.T) {
 }
 
 func TestCrawl_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/crawl" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"success": true, "id": "crawl-789"}`))

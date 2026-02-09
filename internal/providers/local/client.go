@@ -179,172 +179,58 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
 
-	// Validate URL
-	parsedURL, err := url.Parse(startURL)
+	startURL, parsedURL, err := normalizeStartURL(startURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, err
 	}
 
-	// Ensure URL has a scheme
-	if parsedURL.Scheme == "" {
-		parsedURL.Scheme = "https"
-		startURL = parsedURL.String()
+	state := newCrawlState(opts.MaxPages)
+	collector, err := newCrawlCollector(parsedURL, opts.MaxDepth)
+	if err != nil {
+		return nil, err
 	}
 
-	pages := make([]providers.CrawledPage, 0, opts.MaxPages)
-	visited := make(map[string]bool)
-	var mu sync.Mutex
-	var crawlErr error
-
-	// Helper to get clean URL (without fragment) for deduplication
-	getCleanURL := func(u *url.URL) string {
-		clean := *u
-		clean.Fragment = ""
-		clean.RawFragment = ""
-		return clean.String()
-	}
-
-	// Create collector with async mode for better performance
-	effectiveMaxDepth := opts.MaxDepth
-	if effectiveMaxDepth <= 0 {
-		// Explicit depth 0 means crawl only the starting page.
-		effectiveMaxDepth = 1
-	}
-
-	collector := colly.NewCollector(
-		colly.MaxDepth(effectiveMaxDepth),
-		colly.UserAgent("Search-API-Bench/1.0 (Local Crawler)"),
-		colly.Async(true),
-	)
-
-	// Polite rate limiting: 2 concurrent per domain, 500ms delay
-	// Use the target domain for proper per-domain limiting
-	if err := collector.Limit(&colly.LimitRule{
-		DomainGlob:  parsedURL.Host,
-		Parallelism: 2,
-		RandomDelay: 500 * time.Millisecond,
-	}); err != nil {
-		return nil, fmt.Errorf("failed to set rate limit: %w", err)
-	}
-
-	// Context cancellation handling
 	collector.OnRequest(func(r *colly.Request) {
-		select {
-		case <-ctx.Done():
+		if err := ctx.Err(); err != nil {
 			r.Abort()
-			mu.Lock()
-			if crawlErr == nil {
-				crawlErr = ctx.Err()
-			}
-			mu.Unlock()
-			return
-		default:
-		}
-
-		cleanURL := getCleanURL(r.URL)
-		mu.Lock()
-		defer mu.Unlock()
-
-		// Skip requests we've already seen (including duplicate discovered links).
-		if visited[cleanURL] {
-			r.Abort()
+			state.setError(err)
 			return
 		}
-
-		// Check if we've reached max pages
-		if len(pages) >= opts.MaxPages {
+		if state.shouldAbortRequest(cleanURL(r.URL)) {
 			r.Abort()
-			return
 		}
-		visited[cleanURL] = true
 	})
 
-	// Handle errors gracefully - don't fail entire crawl on single page error
 	collector.OnError(func(r *colly.Response, _ error) {
-		// Log error but continue crawling other pages
 		if r.StatusCode == http.StatusNotFound {
-			// 404s are expected, don't treat as fatal
 			return
 		}
-		// For other errors, we continue but could log them
 	})
 
-	// Extract page content
 	collector.OnHTML("html", func(e *colly.HTMLElement) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		// Check context and page limit
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if len(pages) >= opts.MaxPages {
+		if ctx.Err() != nil {
 			return
 		}
-
-		currentURL := e.Request.URL
-		cleanURL := getCleanURL(currentURL)
-
-		// Skip non-HTML content
-		contentType := e.Response.Headers.Get("Content-Type")
-		if contentType != "" && !strings.Contains(contentType, "text/html") {
+		page, ok := extractCrawledPage(e)
+		if !ok {
 			return
 		}
-
-		// Extract content
-		htmlStr, err := e.DOM.Html()
-		if err != nil {
-			return
-		}
-
-		title := e.ChildText("title")
-		if title == "" {
-			title = e.ChildText("h1")
-		}
-
-		// Try to find main content area for better extraction
-		mainContent := e.DOM.Find("article, main, [role='main'], .content, #content").First()
-		if mainContent.Length() > 0 {
-			htmlStr, _ = mainContent.Html()
-		}
-
-		// Convert to markdown
-		markdown, err := md.ConvertString(htmlStr)
-		if err != nil {
-			markdown = htmlStr
-		}
-		markdown = cleanMarkdown(markdown)
-
-		pages = append(pages, providers.CrawledPage{
-			URL:      cleanURL,
-			Title:    strings.TrimSpace(title),
-			Content:  markdown, // Return markdown instead of HTML
-			Markdown: markdown,
-		})
+		state.addPage(page)
 	})
 
-	// Follow links
 	collector.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		if opts.MaxPages == 1 || opts.MaxDepth == 0 {
 			return
 		}
-
-		mu.Lock()
-		if len(pages) >= opts.MaxPages {
-			mu.Unlock()
+		if !state.hasCapacity() {
 			return
 		}
-		mu.Unlock()
 
 		link := e.Attr("href")
-		if link == "" || strings.HasPrefix(link, "#") || strings.HasPrefix(link, "javascript:") {
+		if skipCrawlLink(link) {
 			return
 		}
 
-		// Only follow same-domain links for crawling
 		absoluteURL := e.Request.AbsoluteURL(link)
 		if absoluteURL == "" {
 			return
@@ -354,45 +240,25 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 		if err != nil {
 			return
 		}
-
-		// Stay on same domain
 		if linkURL.Host != parsedURL.Host {
 			return
 		}
-
-		// Skip common non-content URLs
-		lowerPath := strings.ToLower(linkURL.Path)
-		skipExtensions := []string{".pdf", ".jpg", ".jpeg", ".png", ".gif", ".css", ".js", ".zip", ".tar", ".gz"}
-		for _, ext := range skipExtensions {
-			if strings.HasSuffix(lowerPath, ext) {
-				return
-			}
+		if skipCrawlPath(linkURL.Path) {
+			return
 		}
 
-		// Visit the link - ignore errors as they may be due to limits or duplicates
+		// Ignore visit errors (limits, duplicates, etc).
 		_ = e.Request.Visit(absoluteURL)
 	})
 
-	// Start crawling
 	if err := collector.Visit(parsedURL.String()); err != nil {
 		return nil, fmt.Errorf("failed to start crawl: %w", err)
 	}
-
-	// Wait for completion with context awareness
-	done := make(chan struct{})
-	go func() {
-		collector.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Completed normally
-	case <-ctx.Done():
-		// Context cancelled
-		return nil, ctx.Err()
+	if err := waitForCrawl(ctx, collector); err != nil {
+		return nil, err
 	}
 
+	pages, crawlErr := state.result()
 	if crawlErr != nil {
 		return nil, crawlErr
 	}
@@ -406,6 +272,186 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 		Latency:     latency,
 		CreditsUsed: 0, // Local crawling is free!
 	}, nil
+}
+
+type crawlState struct {
+	mu       sync.Mutex
+	pages    []providers.CrawledPage
+	visited  map[string]bool
+	maxPages int
+	crawlErr error
+}
+
+func newCrawlState(maxPages int) *crawlState {
+	if maxPages < 0 {
+		maxPages = 0
+	}
+	return &crawlState{
+		pages:    make([]providers.CrawledPage, 0, maxPages),
+		visited:  make(map[string]bool),
+		maxPages: maxPages,
+	}
+}
+
+func (s *crawlState) setError(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.crawlErr == nil {
+		s.crawlErr = err
+	}
+}
+
+func (s *crawlState) shouldAbortRequest(requestURL string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.pages) >= s.maxPages {
+		return true
+	}
+	if s.visited[requestURL] {
+		return true
+	}
+
+	s.visited[requestURL] = true
+	return false
+}
+
+func (s *crawlState) hasCapacity() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.pages) < s.maxPages
+}
+
+func (s *crawlState) addPage(page providers.CrawledPage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.pages) >= s.maxPages {
+		return
+	}
+	s.pages = append(s.pages, page)
+}
+
+func (s *crawlState) result() ([]providers.CrawledPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pages := make([]providers.CrawledPage, len(s.pages))
+	copy(pages, s.pages)
+	return pages, s.crawlErr
+}
+
+func normalizeStartURL(startURL string) (string, *url.URL, error) {
+	parsedURL, err := url.Parse(startURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsedURL.Scheme == "" {
+		parsedURL.Scheme = "https"
+		startURL = parsedURL.String()
+	}
+	return startURL, parsedURL, nil
+}
+
+func newCrawlCollector(parsedURL *url.URL, maxDepth int) (*colly.Collector, error) {
+	effectiveMaxDepth := maxDepth
+	if effectiveMaxDepth <= 0 {
+		// Explicit depth 0 means crawl only the starting page.
+		effectiveMaxDepth = 1
+	}
+
+	collector := colly.NewCollector(
+		colly.MaxDepth(effectiveMaxDepth),
+		colly.UserAgent("Search-API-Bench/1.0 (Local Crawler)"),
+		colly.Async(true),
+	)
+
+	if err := collector.Limit(&colly.LimitRule{
+		DomainGlob:  parsedURL.Host,
+		Parallelism: 2,
+		RandomDelay: 500 * time.Millisecond,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to set rate limit: %w", err)
+	}
+
+	return collector, nil
+}
+
+func cleanURL(u *url.URL) string {
+	clean := *u
+	clean.Fragment = ""
+	clean.RawFragment = ""
+	return clean.String()
+}
+
+func extractCrawledPage(e *colly.HTMLElement) (providers.CrawledPage, bool) {
+	contentType := e.Response.Headers.Get("Content-Type")
+	if contentType != "" && !strings.Contains(contentType, "text/html") {
+		return providers.CrawledPage{}, false
+	}
+
+	htmlStr, err := e.DOM.Html()
+	if err != nil {
+		return providers.CrawledPage{}, false
+	}
+
+	title := e.ChildText("title")
+	if title == "" {
+		title = e.ChildText("h1")
+	}
+
+	mainContent := e.DOM.Find("article, main, [role='main'], .content, #content").First()
+	if mainContent.Length() > 0 {
+		if mainHTML, err := mainContent.Html(); err == nil {
+			htmlStr = mainHTML
+		}
+	}
+
+	markdown, err := md.ConvertString(htmlStr)
+	if err != nil {
+		markdown = htmlStr
+	}
+	markdown = cleanMarkdown(markdown)
+
+	return providers.CrawledPage{
+		URL:      cleanURL(e.Request.URL),
+		Title:    strings.TrimSpace(title),
+		Content:  markdown,
+		Markdown: markdown,
+	}, true
+}
+
+func skipCrawlLink(link string) bool {
+	return link == "" || strings.HasPrefix(link, "#") || strings.HasPrefix(link, "javascript:")
+}
+
+func skipCrawlPath(path string) bool {
+	lowerPath := strings.ToLower(path)
+	skipExtensions := []string{".pdf", ".jpg", ".jpeg", ".png", ".gif", ".css", ".js", ".zip", ".tar", ".gz"}
+	for _, ext := range skipExtensions {
+		if strings.HasSuffix(lowerPath, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForCrawl(ctx context.Context, collector *colly.Collector) error {
+	done := make(chan struct{})
+	go func() {
+		collector.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // cleanMarkdown removes excessive whitespace and normalizes the markdown output

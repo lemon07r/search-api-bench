@@ -82,6 +82,18 @@ func main() {
 
 	loadEnvFile()
 
+	providerNames, err := parseProviders(*flags.providersFlag, *flags.noLocal)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing providers: %v\n", err)
+		os.Exit(1)
+	}
+
+	formats, err := parseFormats(*flags.format)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing formats: %v\n", err)
+		os.Exit(1)
+	}
+
 	cfg, err := config.Load(*flags.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
@@ -149,10 +161,10 @@ func main() {
 		}
 	}
 
-	provs := initializeProviders(flags.providersFlag, *flags.noLocal, debugLogger)
+	provs := initializeProviders(providerNames, debugLogger)
 
 	if len(provs) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no providers available. Please check your API keys.\n")
+		fmt.Fprintf(os.Stderr, "Error: no providers initialized. Check API keys for selected providers: %s\n", strings.Join(providerNames, ", "))
 		os.Exit(1)
 	}
 
@@ -160,13 +172,13 @@ func main() {
 	totalTests := len(cfg.Tests) * len(provs)
 
 	// Get provider names for progress display
-	providerNames := make([]string, 0, len(provs))
+	progressProviderNames := make([]string, 0, len(provs))
 	for _, p := range provs {
-		providerNames = append(providerNames, p.Name())
+		progressProviderNames = append(progressProviderNames, p.Name())
 	}
 
 	// Create progress manager
-	prog := progress.NewManager(totalTests, providerNames, !*flags.noProgress)
+	prog := progress.NewManager(totalTests, progressProviderNames, !*flags.noProgress)
 
 	// Create runner with progress manager, debug logger, and optional quality scorer
 	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger, scorer)
@@ -193,7 +205,7 @@ func main() {
 	}
 
 	// Generate reports
-	generateReports(flags.format, runner.GetCollector(), cfg.General.OutputDir)
+	generateReports(formats, runner.GetCollector(), cfg.General.OutputDir)
 }
 
 func printBanner() {
@@ -230,9 +242,8 @@ func printSummary(collector *metrics.Collector) {
 	fmt.Println("View detailed results in the output directory.")
 }
 
-func initializeProviders(providersFlag *string, noLocal bool, debugLogger *debug.Logger) []providers.Provider {
+func initializeProviders(providerNames []string, debugLogger *debug.Logger) []providers.Provider {
 	var provs []providers.Provider
-	providerNames := parseProviders(*providersFlag, noLocal)
 
 	for _, name := range providerNames {
 		switch name {
@@ -312,11 +323,10 @@ func initializeProviders(providersFlag *string, noLocal bool, debugLogger *debug
 	return provs
 }
 
-func generateReports(formatFlag *string, collector *metrics.Collector, outputDir string) {
+func generateReports(formats []string, collector *metrics.Collector, outputDir string) {
 	fmt.Println("\nGenerating reports...")
 	gen := report.NewGenerator(collector, outputDir)
 
-	formats := parseFormats(*formatFlag)
 	for _, f := range formats {
 		switch f {
 		case "html":
@@ -383,32 +393,105 @@ func initializeQualityScorer() (*quality.Scorer, error) {
 	return scorer, nil
 }
 
-func parseProviders(s string, noLocal bool) []string {
-	var providers []string
-	if s == "all" {
-		providers = []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
+func parseProviders(s string, noLocal bool) ([]string, error) {
+	allProviders := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
+	validProviders := map[string]struct{}{
+		"firecrawl":  {},
+		"tavily":     {},
+		"local":      {},
+		"brave":      {},
+		"exa":        {},
+		"mixedbread": {},
+		"jina":       {},
+	}
+
+	input := strings.ToLower(strings.TrimSpace(s))
+	if input == "" {
+		return nil, fmt.Errorf("providers cannot be empty (valid values: all, %s)", strings.Join(allProviders, ", "))
+	}
+
+	var selected []string
+	if input == "all" {
+		selected = append(selected, allProviders...)
 	} else {
-		providers = strings.Split(s, ",")
+		seen := make(map[string]struct{})
+		var invalid []string
+		for _, raw := range strings.Split(s, ",") {
+			p := strings.ToLower(strings.TrimSpace(raw))
+			if p == "" {
+				return nil, fmt.Errorf("provider list contains an empty entry")
+			}
+			if _, ok := validProviders[p]; !ok {
+				invalid = append(invalid, p)
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			selected = append(selected, p)
+		}
+		if len(invalid) > 0 {
+			return nil, fmt.Errorf("invalid provider(s): %s (valid values: all, %s)", strings.Join(invalid, ", "), strings.Join(allProviders, ", "))
+		}
 	}
 
 	if noLocal {
-		var filtered []string
-		for _, p := range providers {
+		filtered := make([]string, 0, len(selected))
+		for _, p := range selected {
 			if p != "local" {
 				filtered = append(filtered, p)
 			}
 		}
-		providers = filtered
+		selected = filtered
 	}
 
-	return providers
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("no providers selected after applying flags")
+	}
+
+	return selected, nil
 }
 
-func parseFormats(s string) []string {
-	if s == "all" {
-		return []string{"all"}
+func parseFormats(s string) ([]string, error) {
+	validFormats := map[string]struct{}{
+		"all":  {},
+		"html": {},
+		"md":   {},
+		"json": {},
 	}
-	return strings.Split(s, ",")
+
+	input := strings.ToLower(strings.TrimSpace(s))
+	if input == "" {
+		return nil, fmt.Errorf("format cannot be empty (valid values: all, html, md, json)")
+	}
+
+	seen := make(map[string]struct{})
+	formats := make([]string, 0, 4)
+	for _, raw := range strings.Split(s, ",") {
+		f := strings.ToLower(strings.TrimSpace(raw))
+		if f == "" {
+			return nil, fmt.Errorf("format list contains an empty entry")
+		}
+		if _, ok := validFormats[f]; !ok {
+			return nil, fmt.Errorf("invalid format: %s (valid values: all, html, md, json)", f)
+		}
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		formats = append(formats, f)
+	}
+
+	if len(formats) == 1 && formats[0] == "all" {
+		return formats, nil
+	}
+
+	if _, hasAll := seen["all"]; hasAll {
+		return nil, fmt.Errorf("format 'all' cannot be combined with other formats")
+	}
+
+	return formats, nil
 }
 
 // ensureOutputDir creates a timestamped subdirectory for results

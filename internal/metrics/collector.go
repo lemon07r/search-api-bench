@@ -148,9 +148,6 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 		ErrorBreakdown:   make(map[string]int),
 	}
 
-	// Initialize cost calculator for USD conversions
-	costCalc := NewCostCalculator()
-
 	var totalLatency time.Duration
 	var totalCredits int
 	var totalContentLength int
@@ -158,6 +155,7 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	var totalQualityScore float64
 	var qualityScoreCount int
 	var totalCostUSD float64
+	var costCalc *CostCalculator
 
 	latencies := make([]time.Duration, 0, len(results))
 	executedCount := 0
@@ -188,8 +186,14 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 		totalContentLength += r.ContentLength
 		totalResultsCount += r.ResultsCount
 
-		// Calculate USD cost for this result
-		costUSD := costCalc.CalculateProviderCost(provider, r.CreditsUsed, r.TestType)
+		// Prefer measured per-result cost when available. Fall back to calculator.
+		costUSD := r.CostUSD
+		if costUSD <= 0 {
+			if costCalc == nil {
+				costCalc = NewCostCalculator()
+			}
+			costUSD = costCalc.CalculateProviderCost(provider, r.CreditsUsed, r.TestType)
+		}
 		totalCostUSD += costUSD
 
 		if executedCount == 1 {
@@ -323,6 +327,7 @@ func (c *Collector) GetAllProviders() []string {
 	for p := range providerMap {
 		providers = append(providers, p)
 	}
+	sort.Strings(providers)
 	return providers
 }
 
@@ -340,5 +345,6 @@ func (c *Collector) GetAllTests() []string {
 	for t := range testMap {
 		tests = append(tests, t)
 	}
+	sort.Strings(tests)
 	return tests
 }

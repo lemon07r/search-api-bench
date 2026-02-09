@@ -160,6 +160,45 @@ func TestGenerateMarkdown_ComparisonMath(t *testing.T) {
 	}
 }
 
+func TestGenerateMarkdown_PairwiseDiffsArePositive(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:      "Test",
+		Provider:      "a",
+		TestType:      "search",
+		Success:       true,
+		Latency:       100 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 100,
+		QualityScore:  50,
+	})
+	c.AddResult(metrics.Result{
+		TestName:      "Test",
+		Provider:      "b",
+		TestType:      "search",
+		Success:       true,
+		Latency:       80 * time.Millisecond,
+		CreditsUsed:   2,
+		ContentLength: 200,
+		QualityScore:  75,
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateMarkdown(); err != nil {
+		t.Fatalf("GenerateMarkdown failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.md"))
+	report := string(content)
+	if strings.Contains(report, "returns -") {
+		t.Fatal("pairwise content comparison should not be negative")
+	}
+	if strings.Contains(report, "has -") {
+		t.Fatal("pairwise quality comparison should not be negative")
+	}
+}
+
 func TestGenerateMarkdown_WritesFile(t *testing.T) {
 	c := setupMockCollector()
 	tmpDir := t.TempDir()
