@@ -20,6 +20,10 @@ const (
 	defaultTimeout        = 30 * time.Second
 	defaultCacheTTL       = 5 * time.Minute
 	defaultMaxCacheSize   = 1000
+	defaultMaxRetries     = 3
+	defaultRetryDelay     = 1 * time.Second
+	embeddingMaxRetries   = 3
+	embeddingRetryDelay   = 1 * time.Second
 )
 
 // Instruction templates for different tasks
@@ -257,12 +261,18 @@ func NewEmbeddingClient() (*EmbeddingClient, error) {
 		return nil, fmt.Errorf("EMBEDDING_MODEL_BASE_URL not set")
 	}
 
-	apiKey := os.Getenv("EMBEDDING_EMBEDDING_MODEL_API_KEY")
+	apiKey := os.Getenv("EMBEDDING_MODEL_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("EMBEDDING_EMBEDDING_MODEL_API_KEY not set")
+		return nil, fmt.Errorf("EMBEDDING_MODEL_API_KEY not set")
 	}
 
-	return NewEmbeddingClientWithOptions(baseURL, apiKey, defaultEmbeddingModel, DefaultEmbeddingOptions())
+	// Use EMBEDDING_MODEL env var if set, otherwise use default
+	model := os.Getenv("EMBEDDING_MODEL")
+	if model == "" {
+		model = defaultEmbeddingModel
+	}
+
+	return NewEmbeddingClientWithOptions(baseURL, apiKey, model, DefaultEmbeddingOptions())
 }
 
 // NewEmbeddingClientWithOptions creates a client with custom configuration
@@ -344,7 +354,7 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 		return results, nil
 	}
 
-	// Fetch uncached embeddings
+	// Fetch uncached embeddings with retry logic
 	payload := c.buildRequestPayload(uncachedTexts)
 
 	body, err := json.Marshal(payload)
@@ -352,34 +362,62 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/embeddings", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
 	var result EmbeddingResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	var lastErr error
+
+	for attempt := 0; attempt < embeddingMaxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 1s, 2s, 4s
+			delay := time.Duration(1<<(attempt-1)) * embeddingRetryDelay
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/embeddings", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, embeddingMaxRetries, err)
+			continue // Retry on network errors
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response (attempt %d/%d): %w", attempt+1, embeddingMaxRetries, err)
+			continue
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			// Retry on rate limits and server errors
+			lastErr = fmt.Errorf("API returned status %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, embeddingMaxRetries, string(respBody))
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		// Success - break out of retry loop
+		lastErr = nil
+		break
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
 	}
 
 	// Store in cache and populate results
