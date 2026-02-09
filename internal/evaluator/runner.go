@@ -142,6 +142,14 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 		r.runCrawlTest(timeoutCtx, test, prov, &result, testLog)
 	}
 
+	if testLog != nil && r.debugLogger != nil && r.debugLogger.IsEnabled() {
+		if result.Success {
+			r.debugLogger.SetStatus(testLog, "completed")
+		} else {
+			r.debugLogger.SetStatus(testLog, "failed")
+		}
+	}
+
 	// Report test completion to progress manager
 	if r.progress != nil {
 		var testErr error
@@ -165,10 +173,12 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 
 	if err != nil {
 		result.Success = false
+		result.Latency = latency
 		result.Error = err.Error()
 		result.ErrorCategory = categorizeError(err)
 		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
 			r.debugLogger.LogError(testLog, err.Error(), result.ErrorCategory, "search execution")
+			r.debugLogger.SetMetadata(testLog, "latency_ms", latency.Milliseconds())
 		}
 		if r.progress == nil || !r.progress.IsEnabled() {
 			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
@@ -248,10 +258,12 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 
 	if err != nil {
 		result.Success = false
+		result.Latency = latency
 		result.Error = err.Error()
 		result.ErrorCategory = categorizeError(err)
 		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
 			r.debugLogger.LogError(testLog, err.Error(), result.ErrorCategory, "extract execution")
+			r.debugLogger.SetMetadata(testLog, "latency_ms", latency.Milliseconds())
 		}
 		if r.progress == nil || !r.progress.IsEnabled() {
 			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
@@ -304,11 +316,11 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 
 func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
 	opts := providers.DefaultCrawlOptions()
-	if test.MaxPages > 0 {
-		opts.MaxPages = test.MaxPages
+	if test.MaxPages != nil {
+		opts.MaxPages = *test.MaxPages
 	}
-	if test.MaxDepth > 0 {
-		opts.MaxDepth = test.MaxDepth
+	if test.MaxDepth != nil {
+		opts.MaxDepth = *test.MaxDepth
 	}
 
 	startTime := time.Now()
@@ -317,10 +329,12 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 
 	if err != nil {
 		result.Success = false
+		result.Latency = latency
 		result.Error = err.Error()
 		result.ErrorCategory = categorizeError(err)
 		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
 			r.debugLogger.LogError(testLog, err.Error(), result.ErrorCategory, "crawl execution")
+			r.debugLogger.SetMetadata(testLog, "latency_ms", latency.Milliseconds())
 		}
 		if r.progress == nil || !r.progress.IsEnabled() {
 			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)

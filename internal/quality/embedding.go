@@ -397,8 +397,8 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 			continue
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			// Retry on rate limits and server errors
+		if isRetryableQualityStatus(resp.StatusCode, string(respBody)) {
+			// Retry on known transient failures.
 			lastErr = fmt.Errorf("API returned status %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, embeddingMaxRetries, string(respBody))
 			continue
 		}

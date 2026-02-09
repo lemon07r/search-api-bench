@@ -343,3 +343,73 @@ func TestComputeSummary_AllSuccess(t *testing.T) {
 		t.Errorf("expected 0 failed, got %d", summary.FailedTests)
 	}
 }
+
+func TestComputeSummary_SkipsExcludedFromDenominators(t *testing.T) {
+	c := NewCollector()
+	c.AddResult(Result{
+		Provider:      "test",
+		Success:       true,
+		Latency:       100 * time.Millisecond,
+		CreditsUsed:   2,
+		ContentLength: 200,
+	})
+	c.AddResult(Result{
+		Provider:   "test",
+		Skipped:    true,
+		SkipReason: "unsupported",
+	})
+	c.AddResult(Result{
+		Provider:      "test",
+		Success:       false,
+		Latency:       300 * time.Millisecond,
+		CreditsUsed:   4,
+		ContentLength: 400,
+	})
+
+	summary := c.ComputeSummary("test")
+
+	if summary.TotalTests != 3 {
+		t.Fatalf("expected 3 total tests, got %d", summary.TotalTests)
+	}
+	if summary.SkippedTests != 1 {
+		t.Fatalf("expected 1 skipped test, got %d", summary.SkippedTests)
+	}
+	if summary.ExecutedTests != 2 {
+		t.Fatalf("expected 2 executed tests, got %d", summary.ExecutedTests)
+	}
+	if summary.SuccessRate != 50 {
+		t.Fatalf("expected success rate 50, got %.2f", summary.SuccessRate)
+	}
+	if summary.AvgLatency != 200*time.Millisecond {
+		t.Fatalf("expected avg latency 200ms, got %v", summary.AvgLatency)
+	}
+	if summary.AvgCreditsPerReq != 3 {
+		t.Fatalf("expected avg credits/request 3, got %.2f", summary.AvgCreditsPerReq)
+	}
+	if summary.AvgContentLength != 300 {
+		t.Fatalf("expected avg content length 300, got %.2f", summary.AvgContentLength)
+	}
+}
+
+func TestComputeSummary_AllSkipped(t *testing.T) {
+	c := NewCollector()
+	c.AddResult(Result{Provider: "test", Skipped: true, SkipReason: "unsupported"})
+	c.AddResult(Result{Provider: "test", Skipped: true, SkipReason: "unsupported"})
+
+	summary := c.ComputeSummary("test")
+	if summary.TotalTests != 2 {
+		t.Fatalf("expected 2 total tests, got %d", summary.TotalTests)
+	}
+	if summary.ExecutedTests != 0 {
+		t.Fatalf("expected 0 executed tests, got %d", summary.ExecutedTests)
+	}
+	if summary.SkippedTests != 2 {
+		t.Fatalf("expected 2 skipped tests, got %d", summary.SkippedTests)
+	}
+	if summary.SuccessRate != 0 {
+		t.Fatalf("expected success rate 0, got %.2f", summary.SuccessRate)
+	}
+	if summary.AvgLatency != 0 {
+		t.Fatalf("expected avg latency 0, got %v", summary.AvgLatency)
+	}
+}

@@ -8,10 +8,13 @@ import (
 	"net/http/httptrace"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+const debugSchemaVersion = 2
 
 // TimingBreakdown captures detailed HTTP timing using httptrace
 type TimingBreakdown struct {
@@ -43,16 +46,19 @@ type Session struct {
 
 // ProviderLog contains debug data for a single provider
 type ProviderLog struct {
-	Name      string    `json:"name"`
-	InitTime  time.Time `json:"init_time"`
-	InitError string    `json:"init_error,omitempty"`
-	Tests     []TestLog `json:"tests"`
+	SchemaVersion int        `json:"schema_version"`
+	Name          string     `json:"name"`
+	InitTime      time.Time  `json:"init_time"`
+	InitError     string     `json:"init_error,omitempty"`
+	Tests         []*TestLog `json:"tests"`
 }
 
 // TestLog contains debug data for a single test
 type TestLog struct {
+	ID        string                 `json:"id"`
 	TestName  string                 `json:"test_name"`
 	TestType  string                 `json:"test_type"`
+	Status    string                 `json:"status"`
 	StartTime time.Time              `json:"start_time"`
 	EndTime   *time.Time             `json:"end_time,omitempty"`
 	Duration  time.Duration          `json:"duration"`
@@ -217,9 +223,10 @@ func (l *Logger) LogProviderInit(providerName string, err error) {
 	defer l.mu.Unlock()
 
 	providerLog := &ProviderLog{
-		Name:     providerName,
-		InitTime: time.Now(),
-		Tests:    []TestLog{},
+		SchemaVersion: debugSchemaVersion,
+		Name:          providerName,
+		InitTime:      time.Now(),
+		Tests:         []*TestLog{},
 	}
 
 	if err != nil {
@@ -241,16 +248,20 @@ func (l *Logger) StartTest(providerName, testName, testType string) *TestLog {
 	providerLog, exists := l.session.Providers[providerName]
 	if !exists {
 		providerLog = &ProviderLog{
-			Name:     providerName,
-			InitTime: time.Now(),
-			Tests:    []TestLog{},
+			SchemaVersion: debugSchemaVersion,
+			Name:          providerName,
+			InitTime:      time.Now(),
+			Tests:         []*TestLog{},
 		}
 		l.session.Providers[providerName] = providerLog
 	}
 
-	testLog := TestLog{
+	testID := fmt.Sprintf("%s-%d", providerName, len(providerLog.Tests)+1)
+	testLog := &TestLog{
+		ID:        testID,
 		TestName:  testName,
 		TestType:  testType,
+		Status:    "running",
 		StartTime: time.Now(),
 		Requests:  []RequestLog{},
 		Errors:    []ErrorLog{},
@@ -258,7 +269,7 @@ func (l *Logger) StartTest(providerName, testName, testType string) *TestLog {
 	}
 
 	providerLog.Tests = append(providerLog.Tests, testLog)
-	return &providerLog.Tests[len(providerLog.Tests)-1]
+	return testLog
 }
 
 // LogRequest logs an HTTP request
@@ -394,6 +405,17 @@ func (l *Logger) SetMetadata(testLog *TestLog, key string, value interface{}) {
 	testLog.Metadata[key] = value
 }
 
+// SetStatus sets the test status (running, completed, failed).
+func (l *Logger) SetStatus(testLog *TestLog, status string) {
+	if !l.enabled || testLog == nil {
+		return
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	testLog.Status = status
+}
+
 // EndTest marks a test as complete
 func (l *Logger) EndTest(testLog *TestLog) {
 	if !l.enabled || testLog == nil {
@@ -406,6 +428,9 @@ func (l *Logger) EndTest(testLog *TestLog) {
 	now := time.Now()
 	testLog.EndTime = &now
 	testLog.Duration = now.Sub(testLog.StartTime)
+	if testLog.Status == "" || testLog.Status == "running" {
+		testLog.Status = "completed"
+	}
 }
 
 // Finalize completes the debug session and writes per-provider log files
@@ -429,14 +454,19 @@ func (l *Logger) Finalize() error {
 	// Write session metadata
 	sessionPath := filepath.Join(debugDir, "session.json")
 	sessionData := map[string]interface{}{
-		"start_time":  l.session.StartTime,
-		"end_time":    l.session.EndTime,
-		"system_info": l.session.SystemInfo,
-		"providers":   make([]string, 0, len(l.session.Providers)),
+		"schema_version": debugSchemaVersion,
+		"start_time":     l.session.StartTime,
+		"end_time":       l.session.EndTime,
+		"system_info":    l.session.SystemInfo,
+		"providers":      make([]string, 0, len(l.session.Providers)),
 	}
+
+	providerNames := make([]string, 0, len(l.session.Providers))
 	for name := range l.session.Providers {
-		sessionData["providers"] = append(sessionData["providers"].([]string), name)
+		providerNames = append(providerNames, name)
 	}
+	sort.Strings(providerNames)
+	sessionData["providers"] = providerNames
 
 	data, err := json.MarshalIndent(sessionData, "", "  ")
 	if err != nil {
@@ -447,7 +477,9 @@ func (l *Logger) Finalize() error {
 	}
 
 	// Write per-provider files
-	for providerName, providerLog := range l.session.Providers {
+	for _, providerName := range providerNames {
+		providerLog := l.session.Providers[providerName]
+		providerLog.SchemaVersion = debugSchemaVersion
 		providerPath := filepath.Join(debugDir, providerName+".json")
 		data, err := json.MarshalIndent(providerLog, "", "  ")
 		if err != nil {

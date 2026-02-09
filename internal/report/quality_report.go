@@ -116,7 +116,9 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
 			status := "✓ Pass"
-			if !r.Success {
+			if r.Skipped {
+				status = "⊘ Skip"
+			} else if !r.Success {
 				status = "✗ Fail"
 			}
 
@@ -357,7 +359,9 @@ func (g *QualityReportGenerator) generateQualityTableRows() string {
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
 			status := `<span class="quality-excellent">✓ Pass</span>`
-			if !r.Success {
+			if r.Skipped {
+				status = `<span class="quality-acceptable">⊘ Skip</span>`
+			} else if !r.Success {
 				status = `<span class="quality-failed">✗ Fail</span>`
 			}
 

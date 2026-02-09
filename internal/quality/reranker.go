@@ -197,8 +197,8 @@ func (c *RerankerClient) Rerank(ctx context.Context, query string, documents []s
 			continue
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			// Retry on rate limits and server errors
+		if isRetryableQualityStatus(resp.StatusCode, string(respBody)) {
+			// Retry on known transient failures.
 			lastErr = fmt.Errorf("API returned status %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, rerankerMaxRetries, string(respBody))
 			continue
 		}

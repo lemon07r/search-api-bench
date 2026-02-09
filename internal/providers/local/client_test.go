@@ -271,6 +271,38 @@ func TestClientCrawlMaxPages(t *testing.T) {
 	if result.TotalPages > opts.MaxPages {
 		t.Errorf("Crawl() found %d pages, expected at most %d", result.TotalPages, opts.MaxPages)
 	}
+
+	if result.TotalPages == 1 && result.Pages[0].URL != server.URL+"/" {
+		t.Errorf("expected single-page crawl to return start URL %q, got %q", server.URL+"/", result.Pages[0].URL)
+	}
+}
+
+func TestClientCrawlZeroDepthReturnsStartPageOnly(t *testing.T) {
+	server := setupTestServer()
+	defer server.Close()
+
+	client, _ := NewClient()
+	ctx := context.Background()
+
+	opts := providers.CrawlOptions{
+		MaxPages: 5,
+		MaxDepth: 0,
+	}
+
+	result, err := client.Crawl(ctx, server.URL+"/", opts)
+	if err != nil {
+		t.Fatalf("Crawl() error = %v", err)
+	}
+
+	if result.TotalPages != 1 {
+		t.Fatalf("expected exactly 1 page for max_depth=0, got %d", result.TotalPages)
+	}
+	if len(result.Pages) != 1 {
+		t.Fatalf("expected exactly 1 page in result set, got %d", len(result.Pages))
+	}
+	if result.Pages[0].URL != server.URL+"/" {
+		t.Fatalf("expected start URL %q, got %q", server.URL+"/", result.Pages[0].URL)
+	}
 }
 
 func TestClientCrawlContextTimeout(t *testing.T) {

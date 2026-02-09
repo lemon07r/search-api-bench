@@ -346,9 +346,7 @@ func (g *Generator) generateChartScripts() string {
 		summary := g.collector.ComputeSummary(provider)
 		providerNames[i] = "'" + capitalize(provider) + "'"
 		avgLatencies[i] = float64(summary.AvgLatency.Milliseconds())
-		if summary.TotalTests > 0 {
-			successRates[i] = float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
-		}
+		successRates[i] = summary.SuccessRate
 		avgQualityScores[i] = summary.AvgQualityScore
 		// USD cost metrics
 		totalCostUSD[i] = summary.TotalCostUSD

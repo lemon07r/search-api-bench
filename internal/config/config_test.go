@@ -206,6 +206,36 @@ type = "crawl"
 	}
 }
 
+func TestLoad_CrawlZeroLimitsPreserved(t *testing.T) {
+	content := `
+[[tests]]
+name = "Crawl Zero Limits"
+type = "crawl"
+url = "https://example.com"
+max_pages = 0
+max_depth = 0
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(cfg.Tests))
+	}
+	if cfg.Tests[0].MaxPages == nil || *cfg.Tests[0].MaxPages != 0 {
+		t.Fatalf("expected max_pages pointer with value 0, got %#v", cfg.Tests[0].MaxPages)
+	}
+	if cfg.Tests[0].MaxDepth == nil || *cfg.Tests[0].MaxDepth != 0 {
+		t.Fatalf("expected max_depth pointer with value 0, got %#v", cfg.Tests[0].MaxDepth)
+	}
+}
+
 func TestSave_LoadRoundtrip(t *testing.T) {
 	original := &Config{
 		General: GeneralConfig{

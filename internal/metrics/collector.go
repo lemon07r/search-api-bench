@@ -38,6 +38,7 @@ type Result struct {
 type Summary struct {
 	Provider           string        `json:"provider"`
 	TotalTests         int           `json:"total_tests"`
+	ExecutedTests      int           `json:"executed_tests"`
 	SuccessfulTests    int           `json:"successful_tests"`
 	FailedTests        int           `json:"failed_tests"`
 	SkippedTests       int           `json:"skipped_tests"`
@@ -143,8 +144,6 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	summary := &Summary{
 		Provider:         provider,
 		TotalTests:       len(results),
-		MinLatency:       results[0].Latency,
-		MaxLatency:       results[0].Latency,
 		QualityScoreDist: make(map[string]int),
 		ErrorBreakdown:   make(map[string]int),
 	}
@@ -161,6 +160,7 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	var totalCostUSD float64
 
 	latencies := make([]time.Duration, 0, len(results))
+	executedCount := 0
 
 	for _, r := range results {
 		// Handle skipped tests separately
@@ -168,6 +168,7 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 			summary.SkippedTests++
 			continue // Don't count skipped tests in success/failure metrics
 		}
+		executedCount++
 
 		if r.Success {
 			summary.SuccessfulTests++
@@ -191,11 +192,16 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 		costUSD := costCalc.CalculateProviderCost(provider, r.CreditsUsed, r.TestType)
 		totalCostUSD += costUSD
 
-		if r.Latency < summary.MinLatency {
+		if executedCount == 1 {
 			summary.MinLatency = r.Latency
-		}
-		if r.Latency > summary.MaxLatency {
 			summary.MaxLatency = r.Latency
+		} else {
+			if r.Latency < summary.MinLatency {
+				summary.MinLatency = r.Latency
+			}
+			if r.Latency > summary.MaxLatency {
+				summary.MaxLatency = r.Latency
+			}
 		}
 
 		// Track quality scores
@@ -217,26 +223,31 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	}
 
 	summary.TotalLatency = totalLatency
-	summary.AvgLatency = totalLatency / time.Duration(len(results))
 	summary.TotalCreditsUsed = totalCredits
-	summary.AvgCreditsPerReq = float64(totalCredits) / float64(len(results))
 	summary.TotalContentLength = totalContentLength
-	summary.AvgContentLength = float64(totalContentLength) / float64(len(results))
+	summary.ExecutedTests = executedCount
+	if executedCount > 0 {
+		summary.AvgLatency = totalLatency / time.Duration(executedCount)
+		summary.AvgCreditsPerReq = float64(totalCredits) / float64(executedCount)
+		summary.AvgContentLength = float64(totalContentLength) / float64(executedCount)
+	}
 
 	// Calculate USD cost metrics
 	summary.TotalCostUSD = totalCostUSD
-	summary.AvgCostPerReq = totalCostUSD / float64(len(results))
-	if summary.SuccessfulTests > 0 {
+	if executedCount > 0 {
+		summary.AvgCostPerReq = totalCostUSD / float64(executedCount)
+	}
+	if summary.SuccessfulTests > 0 && totalResultsCount > 0 {
 		summary.CostPerResult = totalCostUSD / float64(totalResultsCount)
 	}
 
-	if summary.TotalTests > 0 {
-		summary.SuccessRate = float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
-		summary.ResultsPerQuery = float64(totalResultsCount) / float64(summary.TotalTests)
+	if executedCount > 0 {
+		summary.SuccessRate = float64(summary.SuccessfulTests) / float64(executedCount) * 100
+		summary.ResultsPerQuery = float64(totalResultsCount) / float64(executedCount)
 	}
 
 	// Calculate efficiency metrics (kept for backward compatibility)
-	if summary.SuccessfulTests > 0 && totalCredits > 0 {
+	if summary.SuccessfulTests > 0 && totalCredits > 0 && totalResultsCount > 0 {
 		summary.CreditsPerResult = float64(totalCredits) / float64(totalResultsCount)
 		summary.ResultsPerCredit = float64(totalResultsCount) / float64(totalCredits)
 	}
