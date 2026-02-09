@@ -57,13 +57,19 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
+	// Ensure URL has a scheme
+	if parsedURL.Scheme == "" {
+		parsedURL.Scheme = "https"
+	}
+
 	var (
 		title       string
 		htmlContent string
 		extractErr  error
+		done        bool
 	)
 
-	// Create collector with context support
+	// Create collector (synchronous mode for single page)
 	collector := colly.NewCollector(
 		colly.UserAgent("Search-API-Bench/1.0 (Local Crawler)"),
 		colly.MaxDepth(1),
@@ -86,13 +92,21 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 
 	// Extract main content - prefer article/main content areas
 	collector.OnHTML("body", func(e *colly.HTMLElement) {
+		if done {
+			return
+		}
 		// Try to find main content area
 		mainContent := e.DOM.Find("article, main, [role='main'], .content, #content, .post, .entry").First()
 		if mainContent.Length() == 0 {
 			mainContent = e.DOM
 		}
 
-		htmlContent, extractErr = mainContent.Html()
+		var err error
+		htmlContent, err = mainContent.Html()
+		if err != nil {
+			extractErr = err
+		}
+		done = true
 	})
 
 	// Handle errors
@@ -106,8 +120,6 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	if err := collector.Visit(parsedURL.String()); err != nil {
 		return nil, fmt.Errorf("failed to visit URL: %w", err)
 	}
-
-	collector.Wait()
 
 	if extractErr != nil {
 		return nil, extractErr
@@ -140,7 +152,7 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	return &providers.ExtractResult{
 		URL:         pageURL,
 		Title:       title,
-		Content:     htmlContent,
+		Content:     markdown, // Return markdown as content (consistent with other providers)
 		Markdown:    markdown,
 		Metadata:    metadata,
 		Latency:     latency,
@@ -160,10 +172,27 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
+	// Ensure URL has a scheme
+	if parsedURL.Scheme == "" {
+		parsedURL.Scheme = "https"
+		startURL = parsedURL.String()
+	}
+
 	pages := make([]providers.CrawledPage, 0, opts.MaxPages)
 	visited := make(map[string]bool)
 	var mu sync.Mutex
 	var crawlErr error
+
+	// Helper to get clean URL (without fragment) for deduplication
+	getCleanURL := func(u *url.URL) string {
+		clean := *u
+		clean.Fragment = ""
+		clean.RawFragment = ""
+		return clean.String()
+	}
+
+	// Mark start URL as visited to prevent re-processing
+	visited[getCleanURL(parsedURL)] = true
 
 	// Create collector with async mode for better performance
 	collector := colly.NewCollector(
@@ -228,11 +257,13 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 			return
 		}
 
-		currentURL := e.Request.URL.String()
-		if visited[currentURL] {
+		currentURL := e.Request.URL
+		cleanURL := getCleanURL(currentURL)
+
+		if visited[cleanURL] {
 			return
 		}
-		visited[currentURL] = true
+		visited[cleanURL] = true
 
 		// Skip non-HTML content
 		contentType := e.Response.Headers.Get("Content-Type")
@@ -265,9 +296,9 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 		markdown = cleanMarkdown(markdown)
 
 		pages = append(pages, providers.CrawledPage{
-			URL:      currentURL,
+			URL:      cleanURL,
 			Title:    strings.TrimSpace(title),
-			Content:  htmlStr,
+			Content:  markdown, // Return markdown instead of HTML
 			Markdown: markdown,
 		})
 	})
