@@ -23,6 +23,7 @@ import (
 	"github.com/lamim/search-api-bench/internal/providers/local"
 	"github.com/lamim/search-api-bench/internal/providers/mixedbread"
 	"github.com/lamim/search-api-bench/internal/providers/tavily"
+	"github.com/lamim/search-api-bench/internal/quality"
 	"github.com/lamim/search-api-bench/internal/report"
 )
 
@@ -37,6 +38,7 @@ type cliFlags struct {
 	quickMode     *bool
 	noSearch      *bool
 	noLocal       *bool
+	qualityMode   *bool
 }
 
 func parseFlags() *cliFlags {
@@ -51,6 +53,7 @@ func parseFlags() *cliFlags {
 		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
 		noSearch:      flag.Bool("no-search", false, "Exclude search tests"),
 		noLocal:       flag.Bool("no-local", false, "Exclude local provider"),
+		qualityMode:   flag.Bool("quality", false, "Enable AI quality scoring (requires EMBEDDING_* and RERANKER_* env vars)"),
 	}
 }
 
@@ -113,6 +116,19 @@ func main() {
 	enableDebug := *flags.debugMode || *flags.debugFullMode
 	debugLogger := debug.NewLogger(enableDebug, *flags.debugFullMode, cfg.General.OutputDir)
 
+	// Initialize quality scorer if enabled
+	var scorer *quality.Scorer
+	if *flags.qualityMode {
+		var err error
+		scorer, err = initializeQualityScorer()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: -quality flag set but failed to initialize: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("🎯 Quality scoring enabled: using embedding + reranker models")
+		fmt.Println()
+	}
+
 	printBanner()
 
 	if *flags.quickMode {
@@ -152,8 +168,8 @@ func main() {
 	// Create progress manager
 	prog := progress.NewManager(totalTests, providerNames, !*flags.noProgress)
 
-	// Create runner with progress manager and debug logger
-	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger)
+	// Create runner with progress manager, debug logger, and optional quality scorer
+	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger, scorer)
 
 	// Print initial banner if not using progress bar
 	if *flags.noProgress {
@@ -177,7 +193,7 @@ func main() {
 	}
 
 	// Generate reports
-	generateReports(flags.format, runner.GetCollector(), cfg.General.OutputDir)
+	generateReports(flags.format, runner.GetCollector(), cfg.General.OutputDir, *flags.qualityMode)
 }
 
 func printBanner() {
@@ -292,7 +308,7 @@ func initializeProviders(providersFlag *string, noLocal bool, debugLogger *debug
 	return provs
 }
 
-func generateReports(formatFlag *string, collector *metrics.Collector, outputDir string) {
+func generateReports(formatFlag *string, collector *metrics.Collector, outputDir string, qualityEnabled bool) {
 	fmt.Println("\nGenerating reports...")
 	gen := report.NewGenerator(collector, outputDir)
 
@@ -326,7 +342,61 @@ func generateReports(formatFlag *string, collector *metrics.Collector, outputDir
 		}
 	}
 
+	// Generate quality-specific reports if quality scoring was enabled
+	if qualityEnabled {
+		qualityGen := report.NewQualityReportGenerator(collector, outputDir)
+		if err := qualityGen.GenerateQualityHTML(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating quality HTML report: %v\n", err)
+		} else {
+			fmt.Printf("✓ Generated quality HTML report: %s/quality_report.html\n", outputDir)
+		}
+		if err := qualityGen.GenerateQualityMarkdown(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating quality Markdown report: %v\n", err)
+		} else {
+			fmt.Printf("✓ Generated quality Markdown report: %s/quality_report.md\n", outputDir)
+		}
+		if err := qualityGen.GenerateQualityJSON(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating quality JSON report: %v\n", err)
+		} else {
+			fmt.Printf("✓ Generated quality JSON report: %s/quality_report.json\n", outputDir)
+		}
+	}
+
 	printSummary(collector)
+}
+
+// initializeQualityScorer creates a quality scorer from environment variables
+func initializeQualityScorer() (*quality.Scorer, error) {
+	// Check required environment variables
+	if os.Getenv("EMBEDDING_MODEL_BASE_URL") == "" {
+		return nil, fmt.Errorf("EMBEDDING_MODEL_BASE_URL not set")
+	}
+	if os.Getenv("EMBEDDING_EMBEDDING_MODEL_API_KEY") == "" {
+		return nil, fmt.Errorf("EMBEDDING_EMBEDDING_MODEL_API_KEY not set")
+	}
+	if os.Getenv("RERANKER_MODEL_BASE_URL") == "" {
+		return nil, fmt.Errorf("RERANKER_MODEL_BASE_URL not set")
+	}
+	if os.Getenv("RERANKER_MODEL_API_KEY") == "" {
+		return nil, fmt.Errorf("RERANKER_MODEL_API_KEY not set")
+	}
+
+	// Create embedding client
+	embeddingClient, err := quality.NewEmbeddingClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedding client: %w", err)
+	}
+
+	// Create reranker client
+	rerankerClient, err := quality.NewRerankerClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create reranker client: %w", err)
+	}
+
+	// Create scorer
+	scorer := quality.NewScorer(embeddingClient, rerankerClient)
+
+	return scorer, nil
 }
 
 func parseProviders(s string, noLocal bool) []string {

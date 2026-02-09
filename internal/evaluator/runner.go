@@ -15,6 +15,7 @@ import (
 	"github.com/lamim/search-api-bench/internal/metrics"
 	"github.com/lamim/search-api-bench/internal/progress"
 	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/search-api-bench/internal/quality"
 )
 
 // Runner executes benchmark tests
@@ -24,16 +25,18 @@ type Runner struct {
 	collector   *metrics.Collector
 	progress    *progress.Manager
 	debugLogger *debug.Logger
+	scorer      *quality.Scorer
 }
 
 // NewRunner creates a new test runner
-func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Manager, debugLog *debug.Logger) *Runner {
+func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Manager, debugLog *debug.Logger, scorer *quality.Scorer) *Runner {
 	return &Runner{
 		providers:   provs,
 		config:      cfg,
 		collector:   metrics.NewCollector(),
 		progress:    prog,
 		debugLogger: debugLog,
+		scorer:      scorer,
 	}
 }
 
@@ -195,6 +198,25 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 				prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), searchResult.CreditsUsed)
 		}
 	}
+
+	// Perform quality scoring if scorer is available
+	if r.scorer != nil && len(searchResult.Results) > 0 {
+		qualityScore, err := r.scorer.ScoreSearch(ctx, test.Query, searchResult.Results)
+		if err != nil {
+			if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+				r.debugLogger.LogError(testLog, fmt.Sprintf("quality scoring failed: %v", err), "quality_error", "search quality scoring")
+			}
+		} else {
+			result.QualityScore = qualityScore.OverallScore
+			result.SemanticScore = qualityScore.SemanticRelevance
+			result.RerankerScore = qualityScore.RerankerScore
+			if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+				r.debugLogger.SetMetadata(testLog, "quality_score", qualityScore.OverallScore)
+				r.debugLogger.SetMetadata(testLog, "semantic_score", qualityScore.SemanticRelevance)
+				r.debugLogger.SetMetadata(testLog, "reranker_score", qualityScore.RerankerScore)
+			}
+		}
+	}
 }
 
 func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
@@ -244,6 +266,17 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 		} else {
 			fmt.Printf("  ✓ %s: %d chars, %v latency, %d credits\n",
 				prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), extractResult.CreditsUsed)
+		}
+	}
+
+	// Perform quality scoring if scorer is available
+	if r.scorer != nil {
+		qualityScore := r.scorer.ScoreExtract(extractResult.Content, extractResult.URL, test.ExpectedContent)
+		result.QualityScore = qualityScore.OverallScore
+		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+			r.debugLogger.SetMetadata(testLog, "quality_score", qualityScore.OverallScore)
+			r.debugLogger.SetMetadata(testLog, "completeness_score", qualityScore.ContentCompleteness)
+			r.debugLogger.SetMetadata(testLog, "structure_score", qualityScore.StructurePreservation)
 		}
 	}
 }
@@ -298,6 +331,17 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	if r.progress == nil || !r.progress.IsEnabled() {
 		fmt.Printf("  ✓ %s: %d pages, %d chars, %v latency, %d credits\n",
 			prov.Name(), crawlResult.TotalPages, contentLength, crawlResult.Latency.Round(time.Millisecond), crawlResult.CreditsUsed)
+	}
+
+	// Perform quality scoring if scorer is available
+	if r.scorer != nil {
+		qualityScore := r.scorer.ScoreCrawl(crawlResult, opts)
+		result.QualityScore = qualityScore.OverallScore
+		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+			r.debugLogger.SetMetadata(testLog, "quality_score", qualityScore.OverallScore)
+			r.debugLogger.SetMetadata(testLog, "coverage_score", qualityScore.CoverageScore)
+			r.debugLogger.SetMetadata(testLog, "depth_accuracy", qualityScore.DepthAccuracy)
+		}
 	}
 }
 

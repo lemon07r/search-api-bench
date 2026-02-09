@@ -127,6 +127,31 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 		fmt.Fprintf(sb, "%d. **%s**: %.0f chars\n", i+1, ps.name, ps.summary.AvgContentLength)
 	}
 	sb.WriteString("\n")
+
+	// Quality ranking (by avg quality score - higher is better) - only if quality scores exist
+	hasQualityScores := false
+	for _, ps := range allSummaries {
+		if ps.summary.AvgQualityScore > 0 {
+			hasQualityScores = true
+			break
+		}
+	}
+	if hasQualityScores {
+		sb.WriteString("**Quality Score (by AI evaluation - higher is better):**\n")
+		sortedByQuality := make([]providerSummary, 0, len(allSummaries))
+		for _, ps := range allSummaries {
+			if ps.summary.AvgQualityScore > 0 {
+				sortedByQuality = append(sortedByQuality, ps)
+			}
+		}
+		sort.Slice(sortedByQuality, func(i, j int) bool {
+			return sortedByQuality[i].summary.AvgQualityScore > sortedByQuality[j].summary.AvgQualityScore
+		})
+		for i, ps := range sortedByQuality {
+			fmt.Fprintf(sb, "%d. **%s**: %.1f/100\n", i+1, ps.name, ps.summary.AvgQualityScore)
+		}
+		sb.WriteString("\n")
+	}
 }
 
 // writePairwiseComparison writes the detailed comparison for exactly 2 providers
@@ -178,6 +203,20 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 	}
 	fmt.Fprintf(sb, "- %s avg content: %.0f chars\n", providers[0], summary1.AvgContentLength)
 	fmt.Fprintf(sb, "- %s avg content: %.0f chars\n", providers[1], summary2.AvgContentLength)
+
+	// Quality comparison if scores exist
+	if summary1.AvgQualityScore > 0 && summary2.AvgQualityScore > 0 {
+		sb.WriteString("\n**Quality Score Comparison:**\n")
+		qualityDiff := summary2.AvgQualityScore - summary1.AvgQualityScore
+		betterQuality := providers[0]
+		if summary2.AvgQualityScore > summary1.AvgQualityScore {
+			betterQuality = providers[1]
+			qualityDiff = -qualityDiff
+		}
+		fmt.Fprintf(sb, "- **%s** has %.1f points higher quality score\n", betterQuality, qualityDiff)
+		fmt.Fprintf(sb, "- %s avg quality: %.1f/100\n", providers[0], summary1.AvgQualityScore)
+		fmt.Fprintf(sb, "- %s avg quality: %.1f/100\n", providers[1], summary2.AvgQualityScore)
+	}
 }
 
 // GenerateMarkdown creates a markdown summary report
@@ -212,11 +251,33 @@ func (g *Generator) GenerateMarkdown() error {
 	// Detailed results by test
 	sb.WriteString("## Detailed Results by Test\n\n")
 
+	// Check if any results have quality scores
+	hasQualityScores := false
+	for _, provider := range providers {
+		results := g.collector.GetResultsByProvider(provider)
+		for _, r := range results {
+			if r.QualityScore > 0 {
+				hasQualityScores = true
+				break
+			}
+		}
+		if hasQualityScores {
+			break
+		}
+	}
+
 	tests := g.collector.GetAllTests()
 	for _, testName := range tests {
 		sb.WriteString(fmt.Sprintf("### %s\n\n", testName))
-		sb.WriteString("| Provider | Status | Latency | Credits | Details |\n")
-		sb.WriteString("|----------|--------|---------|---------|---------|\n")
+
+		// Use appropriate headers based on whether quality scores exist
+		if hasQualityScores {
+			sb.WriteString("| Provider | Status | Latency | Credits | Details | Quality |\n")
+			sb.WriteString("|----------|--------|---------|---------|---------|---------|\n")
+		} else {
+			sb.WriteString("| Provider | Status | Latency | Credits | Details |\n")
+			sb.WriteString("|----------|--------|---------|---------|---------|\n")
+		}
 
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
@@ -235,13 +296,28 @@ func (g *Generator) GenerateMarkdown() error {
 				details = fmt.Sprintf("%d pages, %d chars", r.ResultsCount, r.ContentLength)
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s |\n",
-				r.Provider,
-				status,
-				FormatLatency(r.Latency),
-				r.CreditsUsed,
-				details,
-			))
+			if hasQualityScores {
+				qualityStr := "-"
+				if r.QualityScore > 0 {
+					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
+				}
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s | %s |\n",
+					r.Provider,
+					status,
+					FormatLatency(r.Latency),
+					r.CreditsUsed,
+					details,
+					qualityStr,
+				))
+			} else {
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s |\n",
+					r.Provider,
+					status,
+					FormatLatency(r.Latency),
+					r.CreditsUsed,
+					details,
+				))
+			}
 		}
 		sb.WriteString("\n")
 	}

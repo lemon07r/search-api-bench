@@ -143,6 +143,7 @@ func (g *Generator) GenerateHTML() error {
             </div>
         </div>
 
+` + g.generateQualitySection() + `
         <div class="section">
             <h2>Detailed Results</h2>
             <table>
@@ -154,6 +155,7 @@ func (g *Generator) GenerateHTML() error {
                         <th>Latency</th>
                         <th>Credits</th>
                         <th>Results/Content</th>
+` + g.generateQualityTableHeader() + `
                     </tr>
                 </thead>
                 <tbody>
@@ -194,9 +196,49 @@ func capitalize(s string) string {
 	return string(s[0]-32) + s[1:]
 }
 
+// hasQualityScores checks if any results have quality scores
+func (g *Generator) hasQualityScores() bool {
+	providers := g.collector.GetAllProviders()
+	for _, provider := range providers {
+		results := g.collector.GetResultsByProvider(provider)
+		for _, r := range results {
+			if r.QualityScore > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// generateQualitySection returns the quality chart HTML section if quality scores exist
+func (g *Generator) generateQualitySection() string {
+	if !g.hasQualityScores() {
+		return ""
+	}
+	return `        <div class="section">
+            <h2>AI Quality Score (Embedding + Reranker)</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="qualityChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+`
+}
+
+// generateQualityTableHeader returns the quality column header if quality scores exist
+func (g *Generator) generateQualityTableHeader() string {
+	if !g.hasQualityScores() {
+		return ""
+	}
+	return `                        <th>Quality</th>`
+}
+
 func (g *Generator) generateTableRows() string {
 	var rows string
 	tests := g.collector.GetAllTests()
+	showQuality := g.hasQualityScores()
 
 	formatLatency := func(d time.Duration) string {
 		return fmt.Sprintf("%.0fms", float64(d.Milliseconds()))
@@ -222,7 +264,23 @@ func (g *Generator) generateTableRows() string {
 
 			providerClass := "provider-" + r.Provider
 
-			rows += fmt.Sprintf(`                    <tr>
+			if showQuality {
+				qualityStr := "-"
+				if r.QualityScore > 0 {
+					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
+				}
+				rows += fmt.Sprintf(`                    <tr>
+                        <td>%s</td>
+                        <td><span class="provider-badge %s">%s</span></td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%d</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                    </tr>
+`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), r.CreditsUsed, details, qualityStr)
+			} else {
+				rows += fmt.Sprintf(`                    <tr>
                         <td>%s</td>
                         <td><span class="provider-badge %s">%s</span></td>
                         <td>%s</td>
@@ -231,6 +289,7 @@ func (g *Generator) generateTableRows() string {
                         <td>%s</td>
                     </tr>
 `, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), r.CreditsUsed, details)
+			}
 		}
 	}
 
@@ -248,12 +307,15 @@ func (g *Generator) generateChartScripts() string {
 	creditsPerResult := make([]float64, len(providers))
 	charsPerCredit := make([]float64, len(providers))
 	resultsPerCredit := make([]float64, len(providers))
+	avgQualityScores := make([]float64, len(providers))
 
 	baseColors := []string{"'#ff6b35'", "'#3498db'", "'#27ae60'", "'#9b59b6'", "'#e74c3c'", "'#f39c12'", "'#1abc9c'"}
 	colors := make([]string, len(providers))
 	for i := range providers {
 		colors[i] = baseColors[i%len(baseColors)]
 	}
+
+	showQuality := g.hasQualityScores()
 
 	for i, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
@@ -267,9 +329,44 @@ func (g *Generator) generateChartScripts() string {
 		creditsPerResult[i] = summary.CreditsPerResult
 		charsPerCredit[i] = summary.CharsPerCredit
 		resultsPerCredit[i] = summary.ResultsPerCredit
+		avgQualityScores[i] = summary.AvgQualityScore
 	}
 
-	return fmt.Sprintf(`
+	qualityChartScript := ""
+	if showQuality {
+		qualityChartScript = fmt.Sprintf(`
+        // Quality Score Chart
+        new Chart(document.getElementById('qualityChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [{
+                    label: 'Average Quality Score',
+                    data: [%s],
+                    backgroundColor: [%s],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'AI Quality Score (0-100, higher is better)' }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: { display: true, text: 'Quality Score' }
+                    }
+                }
+            }
+        });
+`, joinStrings(providerNames), formatFloatSlice(avgQualityScores), joinStrings(colors))
+	}
+
+	return qualityChartScript + fmt.Sprintf(`
         // Latency Chart
         new Chart(document.getElementById('latencyChart'), {
             type: 'bar',
