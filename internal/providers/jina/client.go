@@ -64,7 +64,7 @@ func NewClient() (*Client, error) {
 		MaxBackoff:     5 * time.Second,
 		BackoffFactor:  2.0,
 		RetryableErrors: []int{
-			http.StatusTooManyRequests, // 429
+			http.StatusTooManyRequests,    // 429
 			http.StatusServiceUnavailable, // 503
 		},
 	}
