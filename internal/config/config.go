@@ -26,12 +26,14 @@ type GeneralConfig struct {
 
 // TestConfig represents a single test case
 type TestConfig struct {
-	Name            string   `toml:"name"`
-	Type            string   `toml:"type"` // search, extract, crawl
-	Query           string   `toml:"query,omitempty"`
-	URL             string   `toml:"url,omitempty"`
-	MaxPages        int      `toml:"max_pages,omitempty"`
-	MaxDepth        int      `toml:"max_depth,omitempty"`
+	Name  string `toml:"name"`
+	Type  string `toml:"type"` // search, extract, crawl
+	Query string `toml:"query,omitempty"`
+	URL   string `toml:"url,omitempty"`
+	// MaxPages and MaxDepth are pointers so explicit zero values in TOML
+	// are distinguishable from unset fields.
+	MaxPages        *int     `toml:"max_pages,omitempty"`
+	MaxDepth        *int     `toml:"max_depth,omitempty"`
 	ExpectedTopics  []string `toml:"expected_topics,omitempty"`
 	ExpectedContent []string `toml:"expected_content,omitempty"`
 }
@@ -105,6 +107,12 @@ func Load(path string) (*Config, error) {
 		}
 		if (test.Type == "extract" || test.Type == "crawl") && test.URL == "" {
 			return nil, fmt.Errorf("test '%s' of type '%s' requires a URL", test.Name, test.Type)
+		}
+		if test.MaxPages != nil && *test.MaxPages < 0 {
+			return nil, fmt.Errorf("test '%s' has invalid max_pages: %d", test.Name, *test.MaxPages)
+		}
+		if test.MaxDepth != nil && *test.MaxDepth < 0 {
+			return nil, fmt.Errorf("test '%s' has invalid max_depth: %d", test.Name, *test.MaxDepth)
 		}
 	}
 

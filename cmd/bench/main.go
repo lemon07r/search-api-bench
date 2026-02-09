@@ -213,10 +213,14 @@ func printSummary(collector *metrics.Collector) {
 	providerList := collector.GetAllProviders()
 	for _, provider := range providerList {
 		summary := collector.ComputeSummary(provider)
-		successRate := float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
 
 		fmt.Printf("\n%s:\n", strings.ToUpper(provider))
-		fmt.Printf("  Tests: %d (%.1f%% success)\n", summary.TotalTests, successRate)
+		fmt.Printf("  Tests: %d (%d executed, %d skipped, %.1f%% success)\n",
+			summary.TotalTests,
+			summary.ExecutedTests,
+			summary.SkippedTests,
+			summary.SuccessRate,
+		)
 		fmt.Printf("  Avg Latency: %s\n", report.FormatLatency(summary.AvgLatency))
 		fmt.Printf("  Total Credits: %d\n", summary.TotalCreditsUsed)
 		fmt.Printf("  Avg Content: %.0f chars\n", summary.AvgContentLength)
@@ -434,6 +438,10 @@ func filterTests(tests []config.TestConfig, noSearch bool) []config.TestConfig {
 	return filtered
 }
 
+func intPtr(v int) *int {
+	return &v
+}
+
 // applyQuickMode modifies the configuration for quick testing
 func applyQuickMode(cfg *config.Config) *config.Config {
 	// Create a copy of the config
@@ -468,11 +476,11 @@ func applyQuickMode(cfg *config.Config) *config.Config {
 			if !hasCrawl {
 				// Reduce crawl parameters for quick mode
 				quickTest := test
-				if quickTest.MaxPages > 2 {
-					quickTest.MaxPages = 2
+				if quickTest.MaxPages == nil || *quickTest.MaxPages > 2 {
+					quickTest.MaxPages = intPtr(2)
 				}
-				if quickTest.MaxDepth > 1 {
-					quickTest.MaxDepth = 1
+				if quickTest.MaxDepth == nil || *quickTest.MaxDepth > 1 {
+					quickTest.MaxDepth = intPtr(1)
 				}
 				quickCfg.Tests = append(quickCfg.Tests, quickTest)
 				hasCrawl = true

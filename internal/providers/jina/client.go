@@ -29,6 +29,8 @@ const (
 	searchBaseURL  = "https://s.jina.ai"
 	apiBaseURL     = "https://api.jina.ai"
 	defaultTimeout = 30 * time.Second
+	// defaultSearchTimeout bounds each individual search attempt.
+	defaultSearchTimeout = 12 * time.Second
 	// MaxExtractCredits caps the credits for extract to prevent inflated numbers
 	// Jina bills by tokens (chars/4), but we cap at 100 for fair comparison
 	MaxExtractCredits = 100
@@ -38,9 +40,11 @@ const (
 
 // Client represents a Jina AI API client
 type Client struct {
-	apiKey     string
-	httpClient *http.Client
-	retryCfg   providers.RetryConfig
+	apiKey          string
+	httpClient      *http.Client
+	searchRetryCfg  providers.RetryConfig
+	extractRetryCfg providers.RetryConfig
+	searchTimeout   time.Duration
 }
 
 // NewClient creates a new Jina AI client
@@ -56,8 +60,30 @@ func NewClient() (*Client, error) {
 		}
 	}
 
-	// Use conservative retry config to avoid burning credits on retries
-	retryCfg := providers.RetryConfig{
+	searchTimeout := defaultSearchTimeout
+	if t := os.Getenv("JINA_SEARCH_TIMEOUT"); t != "" {
+		if d, err := time.ParseDuration(t); err == nil {
+			searchTimeout = d
+		}
+	}
+
+	// Search uses balanced retry policy to improve reliability without excessive cost.
+	searchRetryCfg := providers.RetryConfig{
+		MaxRetries:     2,
+		InitialBackoff: 500 * time.Millisecond,
+		MaxBackoff:     8 * time.Second,
+		BackoffFactor:  2.0,
+		RetryableErrors: []int{
+			http.StatusTooManyRequests,     // 429
+			http.StatusInternalServerError, // 500
+			http.StatusBadGateway,          // 502
+			http.StatusServiceUnavailable,  // 503
+			http.StatusGatewayTimeout,      // 504
+		},
+	}
+
+	// Extract/crawl keep conservative retries to limit token usage.
+	extractRetryCfg := providers.RetryConfig{
 		MaxRetries:     1, // Reduce from 3 to 1 to limit credit usage on failures
 		InitialBackoff: 500 * time.Millisecond,
 		MaxBackoff:     5 * time.Second,
@@ -73,7 +99,9 @@ func NewClient() (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
-		retryCfg: retryCfg,
+		searchRetryCfg:  searchRetryCfg,
+		extractRetryCfg: extractRetryCfg,
+		searchTimeout:   searchTimeout,
 	}, nil
 }
 
@@ -96,6 +124,8 @@ func (c *Client) SupportsOperation(opType string) bool {
 // Endpoint: GET https://s.jina.ai/?q={query}
 // Returns top 5 results with full content in LLM-friendly format
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
+	searchStart := time.Now()
+
 	// Limit max results to prevent timeouts - Jina Search API can be slow with many results
 	if opts.MaxResults > 3 {
 		opts.MaxResults = 3
@@ -104,13 +134,18 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	var result *providers.SearchResult
 	var searchErr error
 
-	err := c.retryCfg.DoWithRetry(ctx, func() error {
+	err := c.searchRetryCfg.DoWithRetry(ctx, func() error {
 		result, searchErr = c.searchInternal(ctx, query, opts)
 		return searchErr
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(
+			"jina search failed after %d attempts in %s: %w",
+			c.searchRetryCfg.MaxRetries+1,
+			time.Since(searchStart).Round(time.Millisecond),
+			err,
+		)
 	}
 	return result, nil
 }
@@ -118,6 +153,12 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 // searchInternal performs the actual search request
 func (c *Client) searchInternal(ctx context.Context, query string, _ providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
+	reqCtx := ctx
+	cancel := func() {}
+	if c.searchTimeout > 0 {
+		reqCtx, cancel = context.WithTimeout(ctx, c.searchTimeout)
+	}
+	defer cancel()
 
 	// Build search URL with query parameter
 	searchURL := fmt.Sprintf("%s/?q=%s", searchBaseURL, url.QueryEscape(query))
@@ -135,9 +176,10 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	logRequest(ctx, "GET", searchURL, headers, "")
 
 	// Create request with trace context for timing
-	traceCtx, timing, finalize := newTraceContext(ctx)
+	traceCtx, timing, finalize := newTraceContext(reqCtx)
 	req, err := http.NewRequestWithContext(traceCtx, "GET", searchURL, nil)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "request_build", "search request")
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -148,6 +190,7 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() {
@@ -156,6 +199,7 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search response read failed")
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
@@ -175,13 +219,16 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 		// Check if response is JSON error or plain text
 		contentType := resp.Header.Get("Content-Type")
 		if isJSONContent(contentType) {
+			providers.LogError(ctx, string(respBody), "http_status", "search non-200 response")
 			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
 		}
 		// Plain text error (likely rate limit)
 		errMsg := strings.TrimSpace(string(respBody))
 		if resp.StatusCode == http.StatusTooManyRequests || isRateLimitError(errMsg) {
+			providers.LogError(ctx, errMsg, "rate_limit", "search non-200 response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", errMsg)
 		}
+		providers.LogError(ctx, errMsg, "http_status", "search non-200 response")
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, errMsg)
 	}
 
@@ -191,6 +238,7 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 		// Handle plain text response (rate limiting without proper status code)
 		textResp := strings.TrimSpace(string(respBody))
 		if isRateLimitError(textResp) {
+			providers.LogError(ctx, textResp, "rate_limit", "search text response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", textResp)
 		}
 		// Try to parse as plain text search results
@@ -202,13 +250,16 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 		// Check if the body is a plain text error message
 		textBody := strings.TrimSpace(string(respBody))
 		if isRateLimitError(textBody) {
+			providers.LogError(ctx, textBody, "rate_limit", "search parse response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", textBody)
 		}
+		providers.LogError(ctx, err.Error(), "parse", "search unmarshal failed")
 		return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
 	}
 
 	// Check for API-level errors in JSON response
 	if result.Code != 0 && result.Code != 200 {
+		providers.LogError(ctx, fmt.Sprintf("code=%d", result.Code), "api_error", "search json response")
 		return nil, fmt.Errorf("API returned error code %d", result.Code)
 	}
 
@@ -250,7 +301,7 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	var result *providers.ExtractResult
 	var extractErr error
 
-	err := c.retryCfg.DoWithRetry(ctx, func() error {
+	err := c.extractRetryCfg.DoWithRetry(ctx, func() error {
 		result, extractErr = c.extractInternal(ctx, pageURL, opts)
 		return extractErr
 	})
@@ -292,6 +343,7 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 	traceCtx, timing, finalize := newTraceContext(ctx)
 	req, err := http.NewRequestWithContext(traceCtx, "GET", readerURL, nil)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "request_build", "extract request")
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -302,6 +354,7 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() {
@@ -310,6 +363,7 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "extract response read failed")
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
@@ -329,8 +383,10 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 		contentType := resp.Header.Get("Content-Type")
 		errMsg := strings.TrimSpace(string(respBody))
 		if !isJSONContent(contentType) && isRateLimitError(errMsg) {
+			providers.LogError(ctx, errMsg, "rate_limit", "extract non-200 response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", errMsg)
 		}
+		providers.LogError(ctx, errMsg, "http_status", "extract non-200 response")
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, errMsg)
 	}
 
@@ -358,8 +414,10 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 				// Check if body is plain text error
 				textBody := strings.TrimSpace(string(respBody))
 				if isRateLimitError(textBody) {
+					providers.LogError(ctx, textBody, "rate_limit", "extract parse response")
 					return nil, fmt.Errorf("rate limit exceeded: %s", textBody)
 				}
+				providers.LogError(ctx, err.Error(), "parse", "extract unmarshal failed")
 				return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
 			}
 			content = result.Content

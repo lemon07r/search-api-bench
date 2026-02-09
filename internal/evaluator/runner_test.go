@@ -25,6 +25,10 @@ type mockProvider struct {
 	crawlCalls   int32
 }
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func (m *mockProvider) Name() string {
 	return m.name
 }
@@ -344,7 +348,7 @@ func TestRun_CrawlTest(t *testing.T) {
 			OutputDir:   t.TempDir(),
 		},
 		Tests: []config.TestConfig{
-			{Name: "crawl-test", Type: "crawl", URL: "https://example.com", MaxPages: 2},
+			{Name: "crawl-test", Type: "crawl", URL: "https://example.com", MaxPages: intPtr(2)},
 		},
 	}
 
@@ -374,6 +378,86 @@ func TestRun_CrawlTest(t *testing.T) {
 	}
 	if results[0].ResultsCount != 2 {
 		t.Errorf("expected results count 2 (pages), got %d", results[0].ResultsCount)
+	}
+}
+
+func TestRun_CrawlHonorsExplicitZeroDepth(t *testing.T) {
+	cfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency: 1,
+			Timeout:     "30s",
+			OutputDir:   t.TempDir(),
+		},
+		Tests: []config.TestConfig{
+			{
+				Name:     "crawl-zero-depth",
+				Type:     "crawl",
+				URL:      "https://example.com",
+				MaxPages: intPtr(1),
+				MaxDepth: intPtr(0),
+			},
+		},
+	}
+
+	var seenDepth int
+	mock := &mockProvider{
+		name: "mock",
+		crawlFn: func(_ context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
+			seenDepth = opts.MaxDepth
+			return &providers.CrawlResult{
+				URL:         url,
+				Pages:       []providers.CrawledPage{{URL: url}},
+				TotalPages:  1,
+				Latency:     10 * time.Millisecond,
+				CreditsUsed: 1,
+			}, nil
+		},
+	}
+
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if seenDepth != 0 {
+		t.Fatalf("expected explicit MaxDepth=0 to be passed through, got %d", seenDepth)
+	}
+}
+
+func TestRun_FailureRecordsLatency(t *testing.T) {
+	cfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency: 1,
+			Timeout:     "30s",
+			OutputDir:   t.TempDir(),
+		},
+		Tests: []config.TestConfig{
+			{Name: "search-failure-latency", Type: "search", Query: "query"},
+		},
+	}
+
+	mock := &mockProvider{
+		name: "mock",
+		searchFn: func(_ context.Context, _ string, _ providers.SearchOptions) (*providers.SearchResult, error) {
+			time.Sleep(15 * time.Millisecond)
+			return nil, errors.New("boom")
+		},
+	}
+
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	results := runner.GetCollector().GetResults()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Success {
+		t.Fatal("expected failed result")
+	}
+	if results[0].Latency <= 0 {
+		t.Fatalf("expected non-zero failure latency, got %v", results[0].Latency)
 	}
 }
 
@@ -612,7 +696,7 @@ func TestRun_RaceStress(t *testing.T) {
 					{Name: "search-3", Type: "search", Query: "query3"},
 					{Name: "extract-1", Type: "extract", URL: "https://example.com/1"},
 					{Name: "extract-2", Type: "extract", URL: "https://example.com/2"},
-					{Name: "crawl-1", Type: "crawl", URL: "https://example.com", MaxPages: 2},
+					{Name: "crawl-1", Type: "crawl", URL: "https://example.com", MaxPages: intPtr(2)},
 				},
 			}
 

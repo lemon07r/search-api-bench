@@ -98,6 +98,10 @@ max_pages = 10
 max_depth = 2
 ```
 
+Notes:
+- `max_depth = 0` now means "start page only" (no link expansion).
+- `max_pages` / `max_depth` are optional; omitted values use provider defaults.
+
 ## CLI Reference
 
 | Flag | Description | Default |
@@ -124,6 +128,13 @@ Results saved to `results/YYYY-MM-DD_HH-MM-SS/`:
 | `report.md` | Markdown summary tables |
 | `report.json` | Raw data export |
 | `debug/` | Per-provider logs (with `-debug` or `-debug-full`) |
+
+Summary/report semantics:
+- Success rates and performance averages are computed from executed tests only.
+- Skipped tests are reported separately and excluded from those denominators.
+
+Debug logging:
+- Debug artifacts use schema version 2 and include per-test `id` and `status`.
 
 ## Architecture
 

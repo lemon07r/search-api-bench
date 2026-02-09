@@ -204,12 +204,15 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 		return clean.String()
 	}
 
-	// Mark start URL as visited to prevent re-processing
-	visited[getCleanURL(parsedURL)] = true
-
 	// Create collector with async mode for better performance
+	effectiveMaxDepth := opts.MaxDepth
+	if effectiveMaxDepth <= 0 {
+		// Explicit depth 0 means crawl only the starting page.
+		effectiveMaxDepth = 1
+	}
+
 	collector := colly.NewCollector(
-		colly.MaxDepth(opts.MaxDepth),
+		colly.MaxDepth(effectiveMaxDepth),
 		colly.UserAgent("Search-API-Bench/1.0 (Local Crawler)"),
 		colly.Async(true),
 	)
@@ -234,15 +237,26 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 				crawlErr = ctx.Err()
 			}
 			mu.Unlock()
+			return
 		default:
 		}
 
-		// Check if we've reached max pages
+		cleanURL := getCleanURL(r.URL)
 		mu.Lock()
+		defer mu.Unlock()
+
+		// Skip requests we've already seen (including duplicate discovered links).
+		if visited[cleanURL] {
+			r.Abort()
+			return
+		}
+
+		// Check if we've reached max pages
 		if len(pages) >= opts.MaxPages {
 			r.Abort()
+			return
 		}
-		mu.Unlock()
+		visited[cleanURL] = true
 	})
 
 	// Handle errors gracefully - don't fail entire crawl on single page error
@@ -273,11 +287,6 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 
 		currentURL := e.Request.URL
 		cleanURL := getCleanURL(currentURL)
-
-		if visited[cleanURL] {
-			return
-		}
-		visited[cleanURL] = true
 
 		// Skip non-HTML content
 		contentType := e.Response.Headers.Get("Content-Type")
@@ -319,6 +328,10 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 
 	// Follow links
 	collector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		if opts.MaxPages == 1 || opts.MaxDepth == 0 {
+			return
+		}
+
 		mu.Lock()
 		if len(pages) >= opts.MaxPages {
 			mu.Unlock()
