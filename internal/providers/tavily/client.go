@@ -48,6 +48,16 @@ func (c *Client) Name() string {
 	return "tavily"
 }
 
+// SupportsOperation returns whether Tavily supports the given operation type
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "search", "extract", "crawl":
+		return true
+	default:
+		return false
+	}
+}
+
 // Search performs a web search using Tavily
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
@@ -75,7 +85,12 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/search", bytes.NewReader(body))
+	reqURL := c.baseURL + "/search"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type": "application/json",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -84,15 +99,18 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	items := make([]providers.SearchItem, 0, len(result.Results))
 	for _, r := range result.Results {
@@ -148,7 +166,12 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/extract", bytes.NewReader(body))
+	reqURL := c.baseURL + "/extract"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type": "application/json",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -157,15 +180,18 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, err
 	}
 
 	var result extractResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal extract response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	if len(result.Results) == 0 {
 		return nil, fmt.Errorf("no extraction results returned")
@@ -203,7 +229,13 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/map", bytes.NewReader(body))
+	reqURL := c.baseURL + "/map"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -214,13 +246,17 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "map request failed")
 		return nil, err
 	}
 
 	var mapResult mapResponse
 	if err := json.Unmarshal(respBody, &mapResult); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal map response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
+
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), time.Since(start))
 
 	pages := make([]providers.CrawledPage, 0, len(mapResult.Results))
 	creditsUsed := 1 // Map API cost

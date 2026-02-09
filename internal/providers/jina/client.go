@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strings"
@@ -81,6 +80,16 @@ func NewClient() (*Client, error) {
 // Name returns the provider name
 func (c *Client) Name() string {
 	return "jina"
+}
+
+// SupportsOperation returns whether Jina supports the given operation type
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "search", "extract", "crawl":
+		return true
+	default:
+		return false
+	}
 }
 
 // Search performs a web search using Jina AI Search API
@@ -261,8 +270,9 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 		pageURL = "https://" + pageURL
 	}
 
-	// Build reader URL - Jina expects the target URL after /http:// or /https://
-	readerURL := fmt.Sprintf("%s/http://%s", readerBaseURL, pageURL)
+	// Build reader URL - Jina expects the full URL appended after the base
+	// Example: https://r.jina.ai/https://docs.python.org/3/tutorial/
+	readerURL := readerBaseURL + "/" + pageURL
 
 	// Add JSON format if metadata is requested
 	if opts.IncludeMetadata {
@@ -433,38 +443,17 @@ func hasScheme(s string) bool {
 
 // logRequest logs an HTTP request via the debug logger if available
 func logRequest(ctx context.Context, method, url string, headers map[string]string, body string) {
-	testLog := providers.TestLogFromContext(ctx)
-	logger := providers.DebugLoggerFromContext(ctx)
-	if logger == nil || testLog == nil {
-		return
-	}
-	logger.LogRequest(testLog, method, url, headers, body)
+	providers.LogRequest(ctx, method, url, headers, body)
 }
 
 // logResponse logs an HTTP response via the debug logger if available
 func logResponse(ctx context.Context, statusCode int, headers map[string]string, body string, bodySize int, duration time.Duration) {
-	testLog := providers.TestLogFromContext(ctx)
-	logger := providers.DebugLoggerFromContext(ctx)
-	if logger == nil || testLog == nil {
-		return
-	}
-	logger.LogResponse(testLog, statusCode, headers, body, bodySize, duration)
+	providers.LogResponse(ctx, statusCode, headers, body, bodySize, duration)
 }
 
 // newTraceContext creates an httptrace context for timing breakdown if debug is enabled
 func newTraceContext(ctx context.Context) (context.Context, *debug.TimingBreakdown, func()) {
-	testLog := providers.TestLogFromContext(ctx)
-	logger := providers.DebugLoggerFromContext(ctx)
-	if logger == nil || testLog == nil {
-		return ctx, nil, func() {}
-	}
-
-	timing, finalize := logger.NewTraceContext(testLog)
-	trace := logger.GetTraceFromTest(testLog)
-	if trace != nil {
-		return httptrace.WithClientTrace(ctx, trace), timing, finalize
-	}
-	return ctx, timing, finalize
+	return providers.NewTraceContext(ctx)
 }
 
 // isJSONContent checks if content type indicates JSON

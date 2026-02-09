@@ -84,15 +84,34 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov providers.Provider) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, r.config.General.TimeoutDuration())
-	defer cancel()
-
 	result := metrics.Result{
 		TestName:  test.Name,
 		Provider:  prov.Name(),
 		TestType:  test.Type,
 		Timestamp: time.Now(),
 	}
+
+	// Check if provider supports this operation type
+	if !prov.SupportsOperation(test.Type) {
+		result.Skipped = true
+		result.SkipReason = fmt.Sprintf("%s provider does not support %s operations", prov.Name(), test.Type)
+
+		// Report to progress manager (skipped counts as success for progress)
+		if r.progress != nil {
+			r.progress.StartTest(prov.Name(), test.Name)
+			r.progress.CompleteTest(prov.Name(), test.Name, true, nil)
+		}
+
+		if r.progress == nil || !r.progress.IsEnabled() {
+			fmt.Printf("[%s] Skipping '%s': %s\n", prov.Name(), test.Name, result.SkipReason)
+		}
+
+		r.collector.AddResult(result)
+		return
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, r.config.General.TimeoutDuration())
+	defer cancel()
 
 	// Start debug logging for this test
 	var testLog *debug.TestLog
@@ -101,6 +120,8 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 		// Pass debug logger and test log via context
 		timeoutCtx = providers.WithDebugLogger(timeoutCtx, r.debugLogger)
 		timeoutCtx = providers.WithTestLog(timeoutCtx, testLog)
+		// Use defer to ensure EndTest is called even if a panic occurs
+		defer r.debugLogger.EndTest(testLog)
 	}
 
 	// Report test start to progress manager
@@ -119,11 +140,6 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 		r.runExtractTest(timeoutCtx, test, prov, &result, testLog)
 	case "crawl":
 		r.runCrawlTest(timeoutCtx, test, prov, &result, testLog)
-	}
-
-	// End debug logging for this test
-	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
-		r.debugLogger.EndTest(testLog)
 	}
 
 	// Report test completion to progress manager

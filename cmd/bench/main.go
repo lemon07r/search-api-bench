@@ -440,7 +440,7 @@ func applyQuickMode(cfg *config.Config) *config.Config {
 	quickCfg := &config.Config{
 		General: config.GeneralConfig{
 			Concurrency: cfg.General.Concurrency,
-			Timeout:     "20s", // Shorter timeout for quick mode
+			Timeout:     "30s", // Increased from 20s to accommodate slower providers like Jina
 			OutputDir:   cfg.General.OutputDir,
 		},
 		Tests: []config.TestConfig{},

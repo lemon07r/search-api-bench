@@ -72,6 +72,11 @@ func (m *mockProvider) Crawl(ctx context.Context, url string, opts providers.Cra
 	}, nil
 }
 
+func (m *mockProvider) SupportsOperation(opType string) bool {
+	// Mock provider supports all operations by default
+	return true
+}
+
 func TestRun_SingleProviderSingleTest(t *testing.T) {
 	cfg := &config.Config{
 		General: config.GeneralConfig{

@@ -48,6 +48,16 @@ func (c *Client) Name() string {
 	return "firecrawl"
 }
 
+// SupportsOperation returns whether Firecrawl supports the given operation type
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "search", "extract", "crawl":
+		return true
+	default:
+		return false
+	}
+}
+
 // Search performs a web search using Firecrawl
 // Leverages native capabilities: scrape options, location settings
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
@@ -71,7 +81,13 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/search", bytes.NewReader(body))
+	reqURL := c.baseURL + "/search"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -81,15 +97,18 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	items := make([]providers.SearchItem, 0, len(result.Data))
 	for _, d := range result.Data {
@@ -130,7 +149,13 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/scrape", bytes.NewReader(body))
+	reqURL := c.baseURL + "/scrape"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -140,15 +165,18 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, err
 	}
 
 	var result scrapeResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal extract response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	return &providers.ExtractResult{
 		URL:         url,
@@ -185,7 +213,13 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/crawl", bytes.NewReader(body))
+	reqURL := c.baseURL + "/crawl"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -195,11 +229,13 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "crawl request failed")
 		return nil, err
 	}
 
 	var result crawlResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal crawl response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
@@ -209,6 +245,7 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	pages := make([]providers.CrawledPage, 0, len(result.Data))
 	for _, d := range result.Data {

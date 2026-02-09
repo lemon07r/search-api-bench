@@ -58,6 +58,16 @@ func (c *Client) Name() string {
 	return "brave"
 }
 
+// SupportsOperation returns whether Brave supports the given operation type
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "search", "extract", "crawl":
+		return true
+	default:
+		return false
+	}
+}
+
 // Search performs a web search using Brave Search API
 // Endpoint: GET /res/v1/web/search
 // Features leveraged:
@@ -90,6 +100,11 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	searchURL := fmt.Sprintf("%s/web/search?%s", c.baseURL, params.Encode())
 
+	providers.LogRequest(ctx, "GET", searchURL, map[string]string{
+		"X-Subscription-Token": "[REDACTED]",
+		"Accept":               "application/json",
+	}, "")
+
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -101,15 +116,18 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result webSearchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	// Convert Brave results to provider format
 	items := make([]providers.SearchItem, 0, len(result.Web.Results))

@@ -52,6 +52,7 @@ func (g *Generator) GenerateHTML() error {
         tr:hover { background: #f9f9f9; }
         .success { color: #27ae60; }
         .failure { color: #e74c3c; }
+        .skipped { color: #7f8c8d; }
         .provider-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600; }
         .provider-firecrawl { background: #ff6b35; color: white; }
         .provider-tavily { background: #3498db; color: white; }
@@ -261,7 +262,9 @@ func (g *Generator) generateTableRows() string {
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
 			status := `<span class="success">✓ Pass</span>`
-			if !r.Success {
+			if r.Skipped {
+				status = `<span class="skipped">⊘ Skip</span>`
+			} else if !r.Success {
 				status = `<span class="failure">✗ Fail</span>`
 			}
 

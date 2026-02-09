@@ -64,6 +64,16 @@ func (c *Client) Name() string {
 	return "mixedbread"
 }
 
+// SupportsOperation returns whether Mixedbread supports the given operation type
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "search", "extract", "crawl":
+		return true
+	default:
+		return false
+	}
+}
+
 // Search performs a web search using Mixedbread AI Search API
 // Endpoint: POST /v1/stores/search
 // Uses the public "mixedbread/web" store for real-time web search
@@ -90,6 +100,11 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	// Correct endpoint for Mixedbread Stores Search API
 	searchURL := c.baseURL + "/v1/stores/search"
 
+	providers.LogRequest(ctx, "POST", searchURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", searchURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -101,15 +116,18 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	// Convert Mixedbread results to provider format
 	// Response structure: result.Data[].{Text, Score, Metadata.{Title, URL}}
@@ -123,9 +141,9 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		})
 	}
 
-	// Credits: Web search queries are billed as "search with rerank query"
-	// Rough estimate based on query complexity and result count
-	creditsUsed := 10 + len(query)*2 + len(items)*5
+	// Credits: 1 search query made to the API
+	// Cost calculator expects query count, not an internal estimate
+	creditsUsed := 1
 
 	return &providers.SearchResult{
 		Query:        query,
