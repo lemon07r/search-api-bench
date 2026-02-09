@@ -137,12 +137,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 }
 
 // Extract extracts content from a URL using Tavily Extract API
-func (c *Client) Extract(ctx context.Context, url string, _ providers.ExtractOptions) (*providers.ExtractResult, error) {
+// Leverages native capabilities: extract_depth for basic vs comprehensive extraction
+func (c *Client) Extract(ctx context.Context, url string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
 	start := time.Now()
 
+	// Map SearchDepth to extract_depth: basic -> basic, advanced -> comprehensive
+	extractDepth := "basic"
+	if opts.Format == "comprehensive" || opts.IncludeMetadata {
+		extractDepth = "comprehensive"
+	}
+
 	payload := map[string]interface{}{
-		"api_key": c.apiKey,
-		"urls":    []string{url},
+		"api_key":       c.apiKey,
+		"urls":          []string{url},
+		"extract_depth": extractDepth,
 	}
 
 	body, err := json.Marshal(payload)
@@ -254,7 +262,7 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	if len(mapResult.Results) == 0 {
 		// Try to extract the starting URL directly as a fallback
 		extractOpts := providers.ExtractOptions{
-			Format:          "markdown",
+			Format:          "comprehensive",
 			IncludeMetadata: true,
 		}
 
@@ -278,7 +286,7 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 			}
 
 			extractOpts := providers.ExtractOptions{
-				Format:          "markdown",
+				Format:          "comprehensive",
 				IncludeMetadata: true,
 			}
 
