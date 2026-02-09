@@ -1,97 +1,95 @@
 # Search API Benchmark
 
-A Go CLI tool for benchmarking web search, content extraction, and crawling APIs. Compares **7 providers** across performance, cost, and quality.
-
-## Supported Providers
-
-| Provider | Search | Extract | Crawl | Free Tier |
-|----------|--------|---------|-------|-----------|
-| **Firecrawl** | + | + | + | 500 credits |
-| **Tavily** | + | + | + | 1,000 credits/mo |
-| **Brave** | + | + | + | 2,000 queries/mo |
-| **Exa** | + | + | + | $10 credits |
-| **Jina** | + | + | + | 10M tokens |
-| **Mixedbread** | + | + | + | 1,000 files |
-| **Local** | - | + | + | Unlimited |
+A Go CLI for benchmarking web `search`, `extract`, and `crawl` capabilities across multiple providers with consistent tests, latency/cost metrics, and optional AI quality scoring.
 
 ## Quick Start
 
+### 1. Build
+
 ```bash
-# Build and run with all providers
 make build
-./build/search-api-bench
-
-# Run specific provider
-./build/search-api-bench -providers firecrawl
-./build/search-api-bench -providers local  # No API key needed
-
-# Exclude local provider (API-only testing)
-./build/search-api-bench -no-local
-
-# Exclude search tests (extract/crawl only)
-./build/search-api-bench -no-search
-
-# Enable AI quality scoring (requires embedding/reranker env vars)
-./build/search-api-bench -quality
-
-# Quick test mode (3 tests, 20s timeout)
-./build/search-api-bench -quick
-
-# Debug mode with request logging
-./build/search-api-bench -debug
-
-# Full debug with complete bodies + timing breakdown
-./build/search-api-bench -debug-full
 ```
+
+### 2. Run without API keys (local crawler only)
+
+```bash
+./build/search-api-bench -providers local -no-search
+```
+
+### 3. Run a cloud provider
+
+```bash
+# Requires FIRECRAWL_API_KEY in .env or environment
+./build/search-api-bench -providers firecrawl
+```
+
+### 4. Find outputs
+
+Each run writes to a timestamped folder:
+
+```text
+results/YYYY-MM-DD_HH-MM-SS/
+```
+
+With reports such as `report.html`, `report.md`, and `report.json`.
 
 ## Setup
 
-### 1. Configure API Keys
+### Prerequisites
 
-Create `.env` in the project root:
+- Go `1.25+`
+- Optional API keys depending on providers used
+
+### Environment Variables
+
+The CLI auto-loads `.env` from project root if present.
+
+`.env.example` currently includes starter keys for Firecrawl/Tavily only. Add other keys manually as needed:
 
 ```env
-# Required for cloud providers
+# Cloud provider keys
 FIRECRAWL_API_KEY=your_key
 TAVILY_API_KEY=your_key
 BRAVE_API_KEY=your_key
 EXA_API_KEY=your_key
-JINA_API_KEY=your_key
-MIXEDBREAD_API_KEY=your_key
+JINA_API_KEY=your_key                # Optional: Jina works without key (lower limits)
+MXB_API_KEY=your_key                 # Preferred for Mixedbread
+# MIXEDBREAD_API_KEY=your_key        # Also supported
 
-# Optional: AI quality scoring
+# Optional quality scoring
 EMBEDDING_MODEL_BASE_URL=https://api.provider.com/v1
 EMBEDDING_MODEL_API_KEY=your_key
-EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B    # Optional: custom model
+EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
 
 RERANKER_MODEL_BASE_URL=https://api.provider.com/v1
 RERANKER_MODEL_API_KEY=your_key
-RERANKER_MODEL=Qwen/Qwen3-Reranker-8B      # Optional: custom model
+RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
 ```
 
-### 2. Configure Tests
+If `-quality` is enabled, all 4 required `EMBEDDING_*`/`RERANKER_*` base URL + key vars must be set.
 
-Edit `config.toml`:
+### Test Configuration (`config.toml`)
 
 ```toml
 [general]
 concurrency = 3
 timeout = "45s"
+output_dir = "./results"
 
 [[tests]]
-name = "Search - AI Research"
+name = "Search - Example"
 type = "search"
-query = "latest transformer architecture"
-expected_topics = ["transformer", "attention", "LLM"]
+query = "Rust ownership and borrowing"
+expected_topics = ["Rust", "ownership", "borrowing"]
 
 [[tests]]
-name = "Extract - Docs"
+name = "Extract - Example"
 type = "extract"
 url = "https://docs.python.org/3/tutorial/"
 expected_content = ["Python", "tutorial"]
 
 [[tests]]
-name = "Crawl - Site"
+name = "Crawl - Example"
 type = "crawl"
 url = "https://example.com"
 max_pages = 10
@@ -99,176 +97,169 @@ max_depth = 2
 ```
 
 Notes:
-- `max_depth = 0` now means "start page only" (no link expansion).
-- `max_pages` / `max_depth` are optional; omitted values use provider defaults.
+- `max_depth = 0` means start page only (no link expansion).
+- `max_pages` and `max_depth` are optional; provider defaults are used if omitted.
+- `-no-search` removes all search tests at runtime.
 
-## CLI Reference
+## Providers
+
+| Provider | Search | Extract | Crawl | Env Var | Notes |
+|---|---:|---:|---:|---|---|
+| Firecrawl | yes | yes | yes | `FIRECRAWL_API_KEY` | Native API for all 3 ops |
+| Tavily | yes | yes | yes | `TAVILY_API_KEY` | Native API for all 3 ops |
+| Brave | yes | yes | yes | `BRAVE_API_KEY` | Extract/Crawl use direct fetch strategy |
+| Exa | yes | yes | yes | `EXA_API_KEY` | Native search + fetch-based flows |
+| Jina | yes | yes | yes | `JINA_API_KEY` (optional) | Works without key, usually lower limits |
+| Mixedbread | yes | yes | yes | `MXB_API_KEY` or `MIXEDBREAD_API_KEY` | Supports both key names |
+| Local | no | yes | yes | none | `search` unsupported by design |
+
+## CLI Essentials
+
+```bash
+./build/search-api-bench [flags]
+```
+
+### Common commands
+
+```bash
+# All providers selected by default
+./build/search-api-bench
+
+# Specific providers
+./build/search-api-bench -providers firecrawl,tavily
+
+# Exclude local provider even when using all
+./build/search-api-bench -providers all -no-local
+
+# Output only markdown + json
+./build/search-api-bench -format md,json
+
+# Quick mode (up to 3 tests, timeout forced to 30s)
+./build/search-api-bench -quick
+
+# Debug logs
+./build/search-api-bench -debug
+./build/search-api-bench -debug-full
+```
+
+### Flags
 
 | Flag | Description | Default |
-|------|-------------|---------|
+|---|---|---|
 | `-config` | Config file path | `config.toml` |
-| `-output` | Output directory | (from config) |
-| `-providers` | Comma-separated or `all` | `all` |
-| `-format` | `html`, `md`, `json`, `all` | `all` |
-| `-quality` | Enable AI quality scoring | `false` |
-| `-quick` | Reduced test set | `false` |
-| `-debug` | Request/response logging | `false` |
-| `-debug-full` | Complete bodies + timing breakdown | `false` |
+| `-output` | Output base directory (overrides config) | config value |
+| `-providers` | `all` or comma list of providers | `all` |
+| `-format` | `all`, `html`, `md`, `json` | `all` |
+| `-quality` | Enable embedding + reranker quality scoring | `false` |
+| `-quick` | Reduced test run (up to 3 tests, `30s` timeout) | `false` |
+| `-debug` | Request/response debug logging | `false` |
+| `-debug-full` | Full body capture + timing breakdown | `false` |
 | `-no-progress` | Disable progress bar | `false` |
 | `-no-search` | Exclude search tests | `false` |
 | `-no-local` | Exclude local provider | `false` |
 
-## Reports
+### Validation behavior
 
-Results saved to `results/YYYY-MM-DD_HH-MM-SS/`:
+- `-providers` accepts only: `all, firecrawl, tavily, local, brave, exa, mixedbread, jina`.
+- Provider list entries are normalized (trim + lowercase) and deduplicated.
+- Empty entries or invalid names return an error.
+- If filters result in zero providers (for example `-providers local -no-local`), execution stops with an error.
+- `-format` accepts only: `all, html, md, json`.
+- `-format all` cannot be combined with other formats.
 
-| File | Description |
-|------|-------------|
-| `report.html` | Interactive charts (Chart.js) |
-| `report.md` | Markdown summary tables |
-| `report.json` | Raw data export |
-| `debug/` | Per-provider logs (with `-debug` or `-debug-full`) |
+## Reports and Metrics Semantics
 
-Summary/report semantics:
-- Success rates and performance averages are computed from executed tests only.
-- Skipped tests are reported separately and excluded from those denominators.
+Output directory pattern:
 
-Debug logging:
-- Debug artifacts use schema version 2 and include per-test `id` and `status`.
-
-## Architecture
-
-```
-cmd/bench/main.go              # CLI entry, provider init
-├── internal/
-│   ├── config/                # TOML loading
-│   ├── providers/             # Provider implementations
-│   │   ├── interface.go       # Provider interface
-│   │   ├── retry.go           # HTTP retry logic
-│   │   ├── firecrawl/
-│   │   ├── tavily/
-│   │   ├── local/             # Colly-based, no API key
-│   │   ├── brave/
-│   │   ├── exa/
-│   │   ├── jina/
-│   │   └── mixedbread/
-│   ├── evaluator/             # Concurrent test execution
-│   ├── metrics/               # Thread-safe aggregation
-│   ├── report/                # HTML/Markdown/JSON generators
-│   ├── progress/              # Terminal UI
-│   ├── debug/                 # Request/response logging
-│   ├── quality/               # AI scoring (optional)
-│   ├── domains/               # Content validators (optional)
-│   ├── evaluation/            # Cross-provider analysis (optional)
-│   └── robustness/            # Edge cases & stress tests (optional)
+```text
+results/YYYY-MM-DD_HH-MM-SS/
 ```
 
-### Provider Interface
+Generated files:
 
-```go
-type Provider interface {
-    Name() string
-    Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
-    Extract(ctx context.Context, url string, opts ExtractOptions) (*ExtractResult, error)
-    Crawl(ctx context.Context, url string, opts CrawlOptions) (*CrawlResult, error)
-}
-```
+- `report.html`: interactive charts
+- `report.md`: markdown summary + details
+- `report.json`: raw export
+- `debug/`: per-provider debug logs (only with debug flags)
+
+Metrics semantics:
+
+- Success rate and averages are computed from executed (non-skipped) tests.
+- Skipped tests are counted and reported separately.
+- Cost summaries prefer measured per-result `CostUSD` when available.
+
+## Troubleshooting
+
+- `Error parsing providers ...`: invalid provider token or empty list entry.
+- `Error parsing formats ...`: invalid format or `all` combined with others.
+- `no providers initialized`: selected cloud providers are missing API keys.
+- `-quality flag set but failed to initialize`: required embedding/reranker env vars are missing.
+- `no tests match the specified filters`: your config plus `-no-search` left zero runnable tests.
+- Local provider and `search` tests: this is expected; local supports only extract/crawl.
 
 ## Development
 
 ```bash
-make ci              # Full pipeline: fmt → vet → lint → test → build
 make test            # Unit tests
-make test-coverage   # Generate coverage.html
-make build-all       # Cross-compile for all platforms
-make release         # Create release archives
+make ci              # fmt -> vet -> lint -> test -> build
+make test-coverage   # coverage.out + coverage.html
+make build-all       # Cross-platform binaries
+make release         # Build archives + checksums
 ```
 
-### Design Principles
+## Architecture (High-Level)
 
-- **No SDKs**: Pure HTTP clients using Go standard library
-- **Minimal dependencies**: Only `github.com/BurntSushi/toml`
-- **Concurrent**: Semaphore-based rate limiting
-- **Thread-safe**: Mutex-protected metrics
-- **Extensible**: Provider interface for easy additions
-- **Resilient**: Automatic retries with exponential backoff (3 retries, handles 429/5xx)
+```text
+cmd/bench/main.go          CLI, flags, env loading, provider init
+internal/config            TOML loading + validation
+internal/providers         Provider implementations + retry/debug helpers
+internal/evaluator         Concurrent execution runner
+internal/metrics           Thread-safe result aggregation
+internal/report            HTML/Markdown/JSON reports
+internal/debug             Structured debug logs
+internal/quality           Optional AI quality scoring
+```
 
-## API Pricing (February 2026)
+## Advanced Libraries
 
-Running the **full benchmark suite** (13 tests):
+These internal packages can be reused in custom tools:
 
-| Provider | Cost per Run | Free Tier |
-|----------|--------------|-----------|
+- `internal/quality`: embedding/reranker quality scoring
+- `internal/domains`: code/news/academic validators
+- `internal/evaluation`: cross-provider comparisons + golden baselines
+- `internal/robustness`: edge-case generation + stress testing
+
+See package APIs in source for usage examples.
+
+## Pricing and Free-Tier Notes (As of February 9, 2026)
+
+The table below is an operational estimate from benchmark usage patterns, not a billing guarantee.
+
+| Provider | Estimated Cost per Full Default Run (13 tests) | Free Tier (approx) |
+|---|---:|---:|
 | Firecrawl | ~$0.05-0.08 | 500 credits |
-| Tavily | ~$0.01-0.02 | 1,000/mo |
-| Brave | ~$0.03 | 2,000/mo |
+| Tavily | ~$0.01-0.02 | 1,000 credits/month |
+| Brave | ~$0.03 | 2,000 queries/month |
 | Exa | ~$0.03-0.15 | $10 credits |
 | Jina | ~$0.001-0.01 | 10M tokens |
 | Mixedbread | ~$0.01-0.03 | 1,000 files |
 | Local | Free | Unlimited |
 
-Cost tracking is included in reports when data is available from providers.
+Always verify current pricing and quotas before large runs:
 
-## Libraries for Custom Integration
-
-The codebase includes optional libraries for advanced use cases:
-
-### Quality Scoring (`internal/quality`)
-
-AI-powered evaluation using Qwen3-Embedding-8B with MRL and instruction support:
-
-```go
-scorer := quality.NewScorer(embeddingClient, rerankerClient)
-score, _ := scorer.ScoreSearch(ctx, query, results)
-score := scorer.ScoreExtract(content, url, expectedContent)
-score := scorer.ScoreCrawl(crawlResult, opts)
-```
-
-### Domain Validators (`internal/domains`)
-
-```go
-validator := domains.NewCodeValidator([]string{"go", "python"})
-validator := domains.NewNewsValidator(48) // max age in hours
-validator := domains.NewAcademicValidator("apa")
-```
-
-### Cross-Provider Comparison (`internal/evaluation`)
-
-```go
-comparison := evaluation.NewComparison("firecrawl", "tavily")
-result := comparison.CompareSearch(resultA, resultB, itemsA, itemsB)
-```
-
-### Stress Testing (`internal/robustness`)
-
-```go
-gen := robustness.NewEdgeCaseGenerator()
-cases := gen.GenerateSearchEdgeCases() // 25+ cases
-
-runner := robustness.NewStressTestRunner(10, 30*time.Second)
-result, _ := runner.RunBurst(ctx, requestFunc, 100)
-```
+- Firecrawl: `https://www.firecrawl.dev/pricing`
+- Tavily: `https://tavily.com/pricing`
+- Brave Search API: `https://brave.com/search/api/`
+- Exa: `https://exa.ai/pricing`
+- Jina: `https://jina.ai/reader/`
+- Mixedbread: `https://www.mixedbread.com/pricing`
 
 ## CI/CD
 
-GitHub Actions triggers on `v*.*.*` tags:
-- Builds for Linux (amd64/arm64), macOS (amd64/arm64), Windows (amd64)
-- Creates release archives with SHA256 checksums
-- Publishes GitHub release
+GitHub Actions release workflow (`.github/workflows/release.yml`) triggers on tags matching `v*.*.*` and builds:
 
-Local test: `make release`
+- Linux: amd64, arm64
+- macOS: amd64, arm64
+- Windows: amd64
 
-## File Locations
-
-| Purpose | Path |
-|---------|------|
-| Binary | `./build/search-api-bench` |
-| Config | `./config.toml` |
-| Environment | `./.env` (gitignored) |
-| Reports | `./results/YYYY-MM-DD_HH-MM-SS/` |
-| Lint config | `./.golangci.yml` |
-| Golden dataset | `./golden/dataset.json` |
-
-## License
-
-MIT
+Artifacts are archived and published with checksums.
