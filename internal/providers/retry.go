@@ -56,7 +56,8 @@ func (rc *RetryConfig) RetryableError(err error, statusCode int) bool {
 			"too many requests",
 			"quota exceeded",
 			"limit exceeded",
-			"429",
+			"status 429",
+			"http 429",
 		}
 		for _, indicator := range rateLimitIndicators {
 			if strings.Contains(errStr, indicator) {
@@ -148,7 +149,8 @@ func (rc *RetryConfig) isRetryable(err error) bool {
 		"too many requests",
 		"quota exceeded",
 		"limit exceeded",
-		"429",
+		"status 429",
+		"http 429",
 	}
 
 	for _, indicator := range rateLimitIndicators {
@@ -159,14 +161,18 @@ func (rc *RetryConfig) isRetryable(err error) bool {
 
 	// Server error indicators
 	serverErrorIndicators := []string{
-		"500",
-		"502",
-		"503",
-		"504",
 		"internal server error",
 		"bad gateway",
 		"service unavailable",
 		"gateway timeout",
+		"status 500",
+		"status 502",
+		"status 503",
+		"status 504",
+		"http 500",
+		"http 502",
+		"http 503",
+		"http 504",
 	}
 
 	for _, indicator := range serverErrorIndicators {

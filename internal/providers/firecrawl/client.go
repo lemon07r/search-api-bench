@@ -193,11 +193,12 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 // Leverages native capabilities: maxDepth, scrape options, exclude paths
 func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
+	maxPages, maxDepth := normalizeCrawlOptions(opts)
 
 	payload := map[string]interface{}{
 		"url":      url,
-		"limit":    opts.MaxPages,
-		"maxDepth": opts.MaxDepth, // Firecrawl supports max depth natively
+		"limit":    maxPages,
+		"maxDepth": maxDepth, // Firecrawl supports max depth natively
 		"scrapeOptions": map[string]interface{}{
 			"formats": []string{"markdown"},
 		},
@@ -264,6 +265,21 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 		Latency:     latency,
 		CreditsUsed: len(pages), // Each page costs 1 credit
 	}, nil
+}
+
+func normalizeCrawlOptions(opts providers.CrawlOptions) (maxPages int, maxDepth int) {
+	maxPages = opts.MaxPages
+	if maxPages <= 0 {
+		maxPages = 1
+	}
+
+	maxDepth = opts.MaxDepth
+	// Firecrawl rejects deep seed URLs when maxDepth is zero.
+	if maxDepth < 1 {
+		maxDepth = 1
+	}
+
+	return maxPages, maxDepth
 }
 
 func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Time) (*providers.CrawlResult, error) {

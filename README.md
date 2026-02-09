@@ -134,7 +134,7 @@ Notes:
 # Output only markdown + json
 ./build/search-api-bench -format md,json
 
-# Quick mode (up to 3 tests, timeout forced to 30s)
+# Quick mode (up to 3 tests, timeout forced to 30s, crawl max_depth normalized to 1)
 ./build/search-api-bench -quick
 
 # Debug logs
@@ -151,7 +151,7 @@ Notes:
 | `-providers` | `all` or comma list of providers | `all` |
 | `-format` | `all`, `html`, `md`, `json` | `all` |
 | `-quality` | Enable embedding + reranker quality scoring | `false` |
-| `-quick` | Reduced test run (up to 3 tests, `30s` timeout) | `false` |
+| `-quick` | Reduced test run (up to 3 tests, `30s` timeout, crawl `max_depth=1`) | `false` |
 | `-debug` | Request/response debug logging | `false` |
 | `-debug-full` | Full body capture + timing breakdown | `false` |
 | `-no-progress` | Disable progress bar | `false` |

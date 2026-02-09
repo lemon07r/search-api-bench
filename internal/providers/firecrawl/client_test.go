@@ -320,6 +320,70 @@ func TestCrawl_SyncSuccess(t *testing.T) {
 	}
 }
 
+func TestCrawl_NormalizesZeroMaxDepth(t *testing.T) {
+	var captured struct {
+		Limit    int `json:"limit"`
+		MaxDepth int `json:"maxDepth"`
+	}
+
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/crawl" {
+			t.Fatalf("expected /crawl path, got %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+
+		response := crawlResponse{
+			Success: true,
+			Data: []struct {
+				Markdown string `json:"markdown"`
+				Metadata struct {
+					Title     string `json:"title"`
+					SourceURL string `json:"sourceURL"`
+				} `json:"metadata"`
+			}{
+				{
+					Markdown: "Page 1",
+					Metadata: struct {
+						Title     string `json:"title"`
+						SourceURL string `json:"sourceURL"`
+					}{
+						Title:     "Page 1",
+						SourceURL: "https://example.com/1",
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := &Client{
+		apiKey:  "test-key",
+		baseURL: server.URL,
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+	}
+
+	opts := providers.DefaultCrawlOptions()
+	opts.MaxPages = 1
+	opts.MaxDepth = 0
+
+	if _, err := client.Crawl(context.Background(), "https://docs.python.org/3/tutorial/", opts); err != nil {
+		t.Fatalf("unexpected crawl error: %v", err)
+	}
+
+	if captured.MaxDepth != 1 {
+		t.Fatalf("expected normalized maxDepth=1, got %d", captured.MaxDepth)
+	}
+	if captured.Limit != 1 {
+		t.Fatalf("expected limit=1, got %d", captured.Limit)
+	}
+}
+
 func TestCrawl_AsyncPolling(t *testing.T) {
 	callCount := 0
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -272,6 +272,52 @@ func TestGenerateJSON_Summaries(t *testing.T) {
 	}
 }
 
+func TestGenerateJSON_SummariesIncludeQualityCoverageFields(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:      "Search",
+		Provider:      "provider1",
+		TestType:      "search",
+		Success:       true,
+		Latency:       100 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 10,
+		ResultsCount:  1,
+		QualityScore:  80,
+	})
+	c.AddResult(metrics.Result{
+		TestName:      "Search",
+		Provider:      "provider1",
+		TestType:      "search",
+		Success:       false,
+		Latency:       100 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 10,
+		ResultsCount:  1,
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateJSON(); err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.json"))
+	var data map[string]interface{}
+	if err := json.Unmarshal(content, &data); err != nil {
+		t.Fatalf("failed to parse generated report: %v", err)
+	}
+
+	summaries := data["summaries"].(map[string]interface{})
+	provider := summaries["provider1"].(map[string]interface{})
+	if _, ok := provider["quality_coverage_pct"]; !ok {
+		t.Fatal("expected quality_coverage_pct in summary JSON")
+	}
+	if _, ok := provider["reliability_adjusted_quality"]; !ok {
+		t.Fatal("expected reliability_adjusted_quality in summary JSON")
+	}
+}
+
 func TestGenerateJSON_ValidJSON(t *testing.T) {
 	c := setupMockCollector()
 	tmpDir := t.TempDir()
@@ -291,6 +337,56 @@ func TestGenerateJSON_ValidJSON(t *testing.T) {
 	var data interface{}
 	if err := json.Unmarshal(content, &data); err != nil {
 		t.Errorf("generated JSON is invalid: %v", err)
+	}
+}
+
+func TestGenerateMarkdown_IncludesReliabilityAdjustedQualityLeaderboard(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:      "Search",
+		Provider:      "provider1",
+		TestType:      "search",
+		Success:       true,
+		Latency:       100 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 100,
+		ResultsCount:  3,
+		QualityScore:  90,
+	})
+	c.AddResult(metrics.Result{
+		TestName:      "Search",
+		Provider:      "provider2",
+		TestType:      "search",
+		Success:       false,
+		Latency:       200 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 100,
+		ResultsCount:  3,
+		QualityScore:  95,
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateMarkdown(); err != nil {
+		t.Fatalf("GenerateMarkdown failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.md"))
+	report := string(content)
+	if !strings.Contains(report, "Quality Score (by AI evaluation - higher is better):") {
+		t.Fatal("expected classic quality ranking section")
+	}
+	if !strings.Contains(report, "Reliability-Adjusted Quality (quality x success x coverage):") {
+		t.Fatal("expected reliability-adjusted quality section")
+	}
+}
+
+func TestFormatCostUSD_TinyNonZero(t *testing.T) {
+	if got := formatCostUSD(0.000002); got != "<$0.0001" {
+		t.Fatalf("expected '<$0.0001' for tiny non-zero cost, got %q", got)
+	}
+	if got := formatCostUSD(0); got != "$0.00" {
+		t.Fatalf("expected '$0.00' for zero cost, got %q", got)
 	}
 }
 

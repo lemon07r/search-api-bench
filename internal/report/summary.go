@@ -57,6 +57,9 @@ func formatCostUSD(cost float64) string {
 	if cost == 0 {
 		return "$0.00"
 	}
+	if cost > 0 && cost < 0.0001 {
+		return "<$0.0001"
+	}
 	if cost < 0.01 {
 		return fmt.Sprintf("$%.4f", cost)
 	}
@@ -66,11 +69,11 @@ func formatCostUSD(cost float64) string {
 // writeComparisonTable writes the comparison table for all providers
 func (g *Generator) writeComparisonTable(sb *strings.Builder, providers []string) {
 	sb.WriteString("### Summary by Provider\n\n")
-	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content |\n")
-	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|\n")
+	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Quality Coverage |\n")
+	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|------------------|\n")
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
-		fmt.Fprintf(sb, "| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars |\n",
+		fmt.Fprintf(sb, "| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars | %.1f%% |\n",
 			provider,
 			summary.TotalTests,
 			summary.ExecutedTests,
@@ -79,6 +82,7 @@ func (g *Generator) writeComparisonTable(sb *strings.Builder, providers []string
 			FormatLatency(summary.AvgLatency),
 			formatCostUSD(summary.TotalCostUSD),
 			summary.AvgContentLength,
+			summary.QualityCoveragePct,
 		)
 	}
 	sb.WriteString("\n")
@@ -158,6 +162,26 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 		})
 		for i, ps := range sortedByQuality {
 			fmt.Fprintf(sb, "%d. **%s**: %.1f/100\n", i+1, ps.name, ps.summary.AvgQualityScore)
+		}
+		sb.WriteString("\n")
+
+		sb.WriteString("**Reliability-Adjusted Quality (quality x success x coverage):**\n")
+		sortedByAdjustedQuality := make([]providerSummary, len(allSummaries))
+		copy(sortedByAdjustedQuality, allSummaries)
+		sort.Slice(sortedByAdjustedQuality, func(i, j int) bool {
+			return sortedByAdjustedQuality[i].summary.ReliabilityAdjustedQuality > sortedByAdjustedQuality[j].summary.ReliabilityAdjustedQuality
+		})
+		for i, ps := range sortedByAdjustedQuality {
+			fmt.Fprintf(
+				sb,
+				"%d. **%s**: %.1f/100 (quality %.1f, success %.1f%%, coverage %.1f%%)\n",
+				i+1,
+				ps.name,
+				ps.summary.ReliabilityAdjustedQuality,
+				ps.summary.AvgQualityScore,
+				ps.summary.SuccessRate,
+				ps.summary.QualityCoveragePct,
+			)
 		}
 		sb.WriteString("\n")
 	}
@@ -247,12 +271,12 @@ func (g *Generator) GenerateMarkdown() error {
 
 	// Overview table
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content |\n")
-	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|\n")
+	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Quality Coverage |\n")
+	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|------------------|\n")
 
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
-		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars | %.1f%% |\n",
 			provider,
 			summary.TotalTests,
 			summary.ExecutedTests,
@@ -261,6 +285,7 @@ func (g *Generator) GenerateMarkdown() error {
 			FormatLatency(summary.AvgLatency),
 			formatCostUSD(summary.TotalCostUSD),
 			summary.AvgContentLength,
+			summary.QualityCoveragePct,
 		))
 	}
 

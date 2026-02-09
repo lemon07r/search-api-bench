@@ -11,6 +11,8 @@ import (
 	"github.com/lamim/search-api-bench/internal/providers"
 )
 
+const semanticSearchMaxDocumentChars = 4000
+
 // Scorer provides comprehensive quality scoring for search/crawl/extract operations
 type Scorer struct {
 	embedding *EmbeddingClient
@@ -72,17 +74,33 @@ func (s *Scorer) ScoreSearch(ctx context.Context, query string, results []provid
 
 	// Wait for semantic result
 	semanticRes := <-semanticChan
-	if semanticRes.err != nil {
-		return score, fmt.Errorf("semantic scoring failed: %w", semanticRes.err)
+	if semanticRes.err == nil {
+		score.SemanticRelevance = semanticRes.score
+		score.SemanticAvailable = true
 	}
-	score.SemanticRelevance = semanticRes.score
 
 	// Wait for reranker result (if applicable)
+	var rerankerErr error
 	if s.reranker != nil {
 		rerankerRes := <-rerankerChan
 		if rerankerRes.err == nil {
 			score.RerankerScore = rerankerRes.score
+			score.RerankerAvailable = true
+		} else {
+			rerankerErr = rerankerRes.err
 		}
+	}
+	if !score.SemanticAvailable && !score.RerankerAvailable {
+		if semanticRes.err != nil && rerankerErr != nil {
+			return score, fmt.Errorf("semantic scoring failed: %w; reranker scoring failed: %v", semanticRes.err, rerankerErr)
+		}
+		if semanticRes.err != nil {
+			return score, fmt.Errorf("semantic scoring failed: %w", semanticRes.err)
+		}
+		if rerankerErr != nil {
+			return score, fmt.Errorf("reranker scoring failed: %w", rerankerErr)
+		}
+		return score, fmt.Errorf("no quality signals available")
 	}
 
 	// 3. Top-K accuracy (top 3 results)
@@ -98,8 +116,16 @@ func (s *Scorer) ScoreSearch(ctx context.Context, query string, results []provid
 	// 6. Freshness score
 	score.FreshnessScore = s.calculateFreshnessScore(results)
 
+	weights := s.weights
+	if !score.SemanticAvailable {
+		weights.SemanticWeight = 0
+	}
+	if !score.RerankerAvailable {
+		weights.RerankerWeight = 0
+	}
+
 	// Calculate overall weighted score
-	score.OverallScore = CalculateSearchScore(score, s.weights)
+	score.OverallScore = CalculateSearchScore(score, weights)
 
 	return score, nil
 }
@@ -181,7 +207,7 @@ func (s *Scorer) calculateSemanticRelevance(ctx context.Context, query string, r
 	texts := make([]string, len(results)+1)
 	texts[0] = query
 	for i, r := range results {
-		texts[i+1] = r.Title + " " + r.Content
+		texts[i+1] = buildSemanticSearchDocument(r.Title, r.Content)
 	}
 
 	// Get embeddings
@@ -679,4 +705,22 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
+}
+
+func buildSemanticSearchDocument(title, content string) string {
+	title = strings.TrimSpace(title)
+	content = strings.TrimSpace(content)
+
+	if title == "" {
+		return truncate(content, semanticSearchMaxDocumentChars)
+	}
+	if content == "" {
+		return truncate(title, semanticSearchMaxDocumentChars)
+	}
+
+	remaining := semanticSearchMaxDocumentChars - len(title) - 1
+	if remaining <= 0 {
+		return truncate(title, semanticSearchMaxDocumentChars)
+	}
+	return title + " " + truncate(content, remaining)
 }

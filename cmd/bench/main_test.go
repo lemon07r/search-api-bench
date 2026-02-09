@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lamim/search-api-bench/internal/config"
 	"github.com/lamim/search-api-bench/internal/metrics"
 )
 
@@ -72,6 +73,49 @@ func TestParseProviders_NoLocalFilter(t *testing.T) {
 	}
 	if len(result) != 1 || result[0] != "firecrawl" {
 		t.Fatalf("expected [firecrawl], got %v", result)
+	}
+}
+
+func TestApplyQuickMode_NormalizesCrawlDepthToOne(t *testing.T) {
+	cfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency: 2,
+			Timeout:     "45s",
+			OutputDir:   "./results",
+		},
+		Tests: []config.TestConfig{
+			{Name: "search", Type: "search", Query: "q"},
+			{Name: "extract", Type: "extract", URL: "https://example.com"},
+			{
+				Name:     "crawl",
+				Type:     "crawl",
+				URL:      "https://docs.python.org/3/tutorial/",
+				MaxPages: intPtr(1),
+				MaxDepth: intPtr(0),
+			},
+		},
+	}
+
+	quick := applyQuickMode(cfg)
+	if quick.General.Timeout != "30s" {
+		t.Fatalf("expected quick timeout 30s, got %s", quick.General.Timeout)
+	}
+
+	foundCrawl := false
+	for _, test := range quick.Tests {
+		if test.Type != "crawl" {
+			continue
+		}
+		foundCrawl = true
+		if test.MaxDepth == nil || *test.MaxDepth != 1 {
+			t.Fatalf("expected quick crawl max_depth=1, got %+v", test.MaxDepth)
+		}
+		if test.MaxPages == nil || *test.MaxPages <= 0 || *test.MaxPages > 2 {
+			t.Fatalf("expected quick crawl max_pages in [1,2], got %+v", test.MaxPages)
+		}
+	}
+	if !foundCrawl {
+		t.Fatal("expected a crawl test in quick mode output")
 	}
 }
 

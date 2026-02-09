@@ -67,10 +67,13 @@ type Summary struct {
 	ResultsPerCredit float64 `json:"results_per_credit"` // results per credit spent
 
 	// Quality metrics
-	AvgQualityScore  float64        `json:"avg_quality_score"`
-	MinQualityScore  float64        `json:"min_quality_score"`
-	MaxQualityScore  float64        `json:"max_quality_score"`
-	QualityScoreDist map[string]int `json:"quality_score_dist"` // distribution buckets
+	AvgQualityScore            float64        `json:"avg_quality_score"`
+	MinQualityScore            float64        `json:"min_quality_score"`
+	MaxQualityScore            float64        `json:"max_quality_score"`
+	ScoredTests                int            `json:"scored_tests"`
+	QualityCoveragePct         float64        `json:"quality_coverage_pct"`
+	ReliabilityAdjustedQuality float64        `json:"reliability_adjusted_quality"`
+	QualityScoreDist           map[string]int `json:"quality_score_dist"` // distribution buckets
 
 	// Error breakdown
 	ErrorBreakdown map[string]int `json:"error_breakdown,omitempty"`
@@ -269,6 +272,11 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	// Calculate average quality score
 	if qualityScoreCount > 0 {
 		summary.AvgQualityScore = totalQualityScore / float64(qualityScoreCount)
+	}
+	summary.ScoredTests = qualityScoreCount
+	if executedCount > 0 {
+		summary.QualityCoveragePct = float64(qualityScoreCount) / float64(executedCount) * 100
+		summary.ReliabilityAdjustedQuality = summary.AvgQualityScore * (summary.SuccessRate / 100) * (summary.QualityCoveragePct / 100)
 	}
 
 	return summary

@@ -562,7 +562,7 @@ func applyQuickMode(cfg *config.Config) *config.Config {
 				if quickTest.MaxPages == nil || *quickTest.MaxPages > 2 {
 					quickTest.MaxPages = intPtr(2)
 				}
-				if quickTest.MaxDepth == nil || *quickTest.MaxDepth > 1 {
+				if quickTest.MaxDepth == nil || *quickTest.MaxDepth != 1 {
 					quickTest.MaxDepth = intPtr(1)
 				}
 				quickCfg.Tests = append(quickCfg.Tests, quickTest)

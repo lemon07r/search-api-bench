@@ -147,6 +147,10 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 			err,
 		)
 	}
+	if result != nil && opts.MaxResults > 0 && len(result.Results) > opts.MaxResults {
+		result.Results = result.Results[:opts.MaxResults]
+		result.TotalResults = len(result.Results)
+	}
 	return result, nil
 }
 
@@ -540,26 +544,106 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// parsePlainTextSearchResponse attempts to parse plain text as search results
+// parsePlainTextSearchResponse attempts to parse plain text as search results.
 func (c *Client) parsePlainTextSearchResponse(query, text string, startTime time.Time) (*providers.SearchResult, error) {
 	latency := time.Since(startTime)
+	text = strings.TrimSpace(text)
 
-	// If text is empty or looks like an error, return it as error
-	if text == "" || strings.Contains(strings.ToLower(text), "error") {
+	if text == "" || isLikelyPlainTextError(text) {
 		return nil, fmt.Errorf("API returned plain text error: %s", text)
 	}
 
-	// Create a single search result from the text
-	// This is a fallback when JSON format is not available
-	items := []providers.SearchItem{
-		{
-			Title:   "Search Result",
-			URL:     "",
-			Content: text,
-		},
+	items := make([]providers.SearchItem, 0, 5)
+	fallbackLines := make([]string, 0, 8)
+
+	type plainTextSearchItem struct {
+		title        string
+		url          string
+		contentLines []string
 	}
 
-	// Calculate credits based on actual content length
+	var current *plainTextSearchItem
+	flushCurrent := func() {
+		if current == nil {
+			return
+		}
+		title := strings.TrimSpace(current.title)
+		content := strings.TrimSpace(strings.Join(current.contentLines, "\n"))
+		if title == "" && content == "" && current.url == "" {
+			current = nil
+			return
+		}
+		if title == "" {
+			title = "Search Result"
+		}
+		if content == "" {
+			content = title
+		}
+		items = append(items, providers.SearchItem{
+			Title:   title,
+			URL:     strings.TrimSpace(current.url),
+			Content: content,
+		})
+		current = nil
+	}
+
+	for _, rawLine := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		field, value, ok := parseNumberedMetadataLine(line)
+		if ok {
+			switch strings.ToLower(field) {
+			case "title":
+				flushCurrent()
+				current = &plainTextSearchItem{title: value}
+			case "url source":
+				if current == nil {
+					current = &plainTextSearchItem{}
+				}
+				current.url = value
+			case "description":
+				if current == nil {
+					current = &plainTextSearchItem{}
+				}
+				if value != "" {
+					current.contentLines = append(current.contentLines, value)
+				}
+			default:
+				if current != nil && value != "" {
+					current.contentLines = append(current.contentLines, value)
+				}
+			}
+			continue
+		}
+
+		if current != nil {
+			current.contentLines = append(current.contentLines, line)
+			continue
+		}
+		fallbackLines = append(fallbackLines, line)
+	}
+	flushCurrent()
+
+	if len(items) == 0 {
+		fallbackText := strings.TrimSpace(strings.Join(fallbackLines, "\n"))
+		if fallbackText == "" {
+			fallbackText = text
+		}
+		if isLikelyPlainTextError(fallbackText) {
+			return nil, fmt.Errorf("API returned plain text error: %s", fallbackText)
+		}
+		items = []providers.SearchItem{
+			{
+				Title:   "Search Result",
+				URL:     "",
+				Content: fallbackText,
+			},
+		}
+	}
+
 	creditsUsed := BaseSearchCredits + (len(text) / 4)
 	if creditsUsed > 10000 {
 		creditsUsed = 10000
@@ -572,6 +656,71 @@ func (c *Client) parsePlainTextSearchResponse(query, text string, startTime time
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
 	}, nil
+}
+
+func parseNumberedMetadataLine(line string) (field, value string, ok bool) {
+	if !strings.HasPrefix(line, "[") {
+		return "", "", false
+	}
+	closing := strings.Index(line, "]")
+	if closing <= 1 || closing+1 >= len(line) {
+		return "", "", false
+	}
+
+	rest := strings.TrimSpace(line[closing+1:])
+	parts := strings.SplitN(rest, ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+
+	field = strings.TrimSpace(parts[0])
+	value = strings.TrimSpace(parts[1])
+	if field == "" {
+		return "", "", false
+	}
+	return field, value, true
+}
+
+func isLikelyPlainTextError(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	if isRateLimitError(lower) {
+		return true
+	}
+
+	errorPrefixes := []string{
+		"error:",
+		"error -",
+		"request failed",
+		"failed:",
+		"{\"error\":",
+		"{\"detail\":",
+		"service unavailable",
+	}
+	for _, prefix := range errorPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+
+	// Short plain-text bodies that contain these patterns are usually API errors.
+	if len(lower) < 200 {
+		transientHints := []string{
+			"unable to process request",
+			"try again later",
+			"temporarily unavailable",
+		}
+		for _, hint := range transientHints {
+			if strings.Contains(lower, hint) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func extractTitleFromMarkdown(content string) string {

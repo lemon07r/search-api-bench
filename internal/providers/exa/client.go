@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
@@ -132,20 +133,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	// Convert Exa results to provider format
+	contextByURL, contextByTitle := parseExaContextBlocks(result.Context)
 	items := make([]providers.SearchItem, 0, len(result.Results))
 	for _, r := range result.Results {
+		content := selectExaSearchContent(r, result.Context, contextByURL, contextByTitle)
 		item := providers.SearchItem{
 			Title:   r.Title,
 			URL:     r.URL,
-			Content: r.Text,
+			Content: content,
 			Score:   r.Score,
 		}
 
 		// Parse published date if available
-		if r.PublishedDate != "" {
-			if t, err := time.Parse("2006-01-02", r.PublishedDate); err == nil {
-				item.PublishedAt = &t
-			}
+		if publishedAt, ok := parseExaPublishedAt(r.PublishedDate); ok {
+			item.PublishedAt = publishedAt
 		}
 
 		items = append(items, item)
@@ -423,16 +424,22 @@ func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ provider
 // Response types
 
 type searchResponse struct {
-	RequestID string `json:"requestId"`
-	Results   []struct {
-		Title         string  `json:"title"`
-		URL           string  `json:"url"`
-		Text          string  `json:"text"`
-		Score         float64 `json:"score"`
-		PublishedDate string  `json:"publishedDate,omitempty"`
-		Author        string  `json:"author,omitempty"`
-	} `json:"results"`
-	AutopromptString string `json:"autopromptString,omitempty"`
+	RequestID        string         `json:"requestId"`
+	ResolvedType     string         `json:"resolvedSearchType,omitempty"`
+	Context          string         `json:"context,omitempty"`
+	Results          []exaSearchHit `json:"results"`
+	AutopromptString string         `json:"autopromptString,omitempty"`
+}
+
+type exaSearchHit struct {
+	Title         string  `json:"title"`
+	URL           string  `json:"url"`
+	Text          string  `json:"text,omitempty"`
+	Summary       string  `json:"summary,omitempty"`
+	Snippet       string  `json:"snippet,omitempty"`
+	Score         float64 `json:"score,omitempty"`
+	PublishedDate string  `json:"publishedDate,omitempty"`
+	Author        string  `json:"author,omitempty"`
 }
 
 type contentsResponse struct {
@@ -444,4 +451,98 @@ type contentsResponse struct {
 		Image      string   `json:"image,omitempty"`
 		Highlights []string `json:"highlights,omitempty"`
 	} `json:"results"`
+}
+
+func parseExaPublishedAt(value string) (*time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return &parsed, true
+		}
+	}
+	return nil, false
+}
+
+func selectExaSearchContent(result exaSearchHit, rawContext string, contextByURL, contextByTitle map[string]string) string {
+	candidates := []string{
+		result.Text,
+		result.Summary,
+		result.Snippet,
+		contextByURL[strings.TrimSpace(result.URL)],
+		contextByTitle[strings.TrimSpace(result.Title)],
+		rawContext,
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func parseExaContextBlocks(context string) (map[string]string, map[string]string) {
+	byURL := make(map[string]string)
+	byTitle := make(map[string]string)
+	context = strings.TrimSpace(context)
+	if context == "" {
+		return byURL, byTitle
+	}
+
+	type contextBlock struct {
+		title string
+		url   string
+		lines []string
+	}
+
+	var current *contextBlock
+	flushCurrent := func() {
+		if current == nil {
+			return
+		}
+		content := strings.TrimSpace(strings.Join(current.lines, "\n"))
+		if content == "" {
+			current = nil
+			return
+		}
+		if current.url != "" {
+			byURL[strings.TrimSpace(current.url)] = content
+		}
+		if current.title != "" {
+			byTitle[strings.TrimSpace(current.title)] = content
+		}
+		current = nil
+	}
+
+	for _, rawLine := range strings.Split(context, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if strings.HasPrefix(line, "Title: ") {
+			flushCurrent()
+			current = &contextBlock{
+				title: strings.TrimSpace(strings.TrimPrefix(line, "Title: ")),
+				lines: []string{line},
+			}
+			continue
+		}
+
+		if current == nil {
+			continue
+		}
+		current.lines = append(current.lines, line)
+		if strings.HasPrefix(line, "URL: ") {
+			current.url = strings.TrimSpace(strings.TrimPrefix(line, "URL: "))
+		}
+	}
+	flushCurrent()
+
+	return byURL, byTitle
 }
