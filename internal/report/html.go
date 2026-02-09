@@ -199,7 +199,7 @@ func (g *Generator) generateTableRows() string {
 	tests := g.collector.GetAllTests()
 
 	formatLatency := func(d time.Duration) string {
-		return fmt.Sprintf("%dms", d.Milliseconds())
+		return fmt.Sprintf("%.0fms", float64(d.Milliseconds()))
 	}
 
 	for _, testName := range tests {
