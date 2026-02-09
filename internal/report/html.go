@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/lamim/search-api-bench/internal/metrics"
 )
 
 // GenerateHTML creates an HTML report with charts
@@ -59,6 +62,22 @@ func (g *Generator) GenerateHTML() error {
         .provider-local { background: #1abc9c; color: white; }
         .section { margin-bottom: 40px; }
         h2 { color: #2c3e50; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #3498db; }
+        .advanced-section { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; margin: 40px 0 30px 0; border-radius: 8px; }
+        .advanced-section h2 { color: white; border-bottom: 2px solid rgba(255,255,255,0.3); margin-bottom: 5px; }
+        .advanced-subtitle { font-size: 0.9em; opacity: 0.9; }
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .chart-grid .chart-container { margin-bottom: 0; }
+        .chart-grid .chart-wrapper { height: 350px; }
+        .heatmap-cell { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9em; border-radius: 4px; }
+        .heatmap-excellent { background: #27ae60; color: white; }
+        .heatmap-good { background: #2ecc71; color: white; }
+        .heatmap-acceptable { background: #f39c12; color: white; }
+        .heatmap-poor { background: #e74c3c; color: white; }
+        .heatmap-na { background: #ecf0f1; color: #7f8c8d; }
+        .heatmap-grid { display: grid; gap: 4px; margin-top: 20px; }
+        .heatmap-header { font-weight: 600; font-size: 0.85em; color: #666; padding: 8px; text-align: center; }
+        .heatmap-provider { font-weight: 600; font-size: 0.85em; color: #333; padding: 8px; display: flex; align-items: center; }
+        .scatter-tooltip { background: rgba(0,0,0,0.8); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.85em; }
     </style>
 </head>
 <body>
@@ -143,7 +162,7 @@ func (g *Generator) GenerateHTML() error {
             </div>
         </div>
 
-` + g.generateQualitySection() + `
+` + g.generateQualitySection() + g.generateAdvancedAnalyticsSection() + `
         <div class="section">
             <h2>Detailed Results</h2>
             <table>
@@ -322,6 +341,13 @@ func (g *Generator) generateChartScripts() string {
 	// USD cost metrics
 	totalCostUSD := make([]float64, len(providers))
 	costPerResult := make([]float64, len(providers))
+	// Latency distribution data
+	minLatencies := make([]float64, len(providers))
+	p50Latencies := make([]float64, len(providers))
+	p95Latencies := make([]float64, len(providers))
+	maxLatencies := make([]float64, len(providers))
+	// Content metrics
+	avgContentLengths := make([]float64, len(providers))
 
 	baseColors := []string{"'#ff6b35'", "'#3498db'", "'#27ae60'", "'#9b59b6'", "'#e74c3c'", "'#f39c12'", "'#1abc9c'"}
 	colors := make([]string, len(providers))
@@ -347,6 +373,13 @@ func (g *Generator) generateChartScripts() string {
 		// USD cost metrics
 		totalCostUSD[i] = summary.TotalCostUSD
 		costPerResult[i] = summary.CostPerResult
+		// Latency distribution
+		minLatencies[i] = float64(summary.MinLatency.Milliseconds())
+		p50Latencies[i] = float64(summary.P50Latency.Milliseconds())
+		p95Latencies[i] = float64(summary.P95Latency.Milliseconds())
+		maxLatencies[i] = float64(summary.MaxLatency.Milliseconds())
+		// Content
+		avgContentLengths[i] = summary.AvgContentLength
 	}
 
 	qualityChartScript := ""
@@ -382,6 +415,8 @@ func (g *Generator) generateChartScripts() string {
         });
 `, joinStrings(providerNames), formatFloatSlice(avgQualityScores), joinStrings(colors))
 	}
+
+	advancedScripts := g.generateAdvancedChartScripts(providers, providerNames, colors, baseColors)
 
 	return qualityChartScript + fmt.Sprintf(`
         // Latency Chart
@@ -553,12 +588,346 @@ func (g *Generator) generateChartScripts() string {
                 }
             }
         });
-`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
+%s`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
 		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors),
 		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors),
 		joinStrings(providerNames), formatFloatSlice(totalCostUSD), joinStrings(colors),
 		joinStrings(providerNames), formatFloatSlice(costPerResult), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(creditsPerResult), joinStrings(colors))
+		joinStrings(providerNames), formatFloatSlice(creditsPerResult), joinStrings(colors),
+		advancedScripts)
+}
+
+// generateAdvancedChartScripts creates JavaScript for all advanced analytics charts
+func (g *Generator) generateAdvancedChartScripts(providers []string, providerNames []string, _ []string, baseColors []string) string {
+	if len(providers) < 2 {
+		return ""
+	}
+
+	// Prepare normalized data for radar chart (0-100 scale)
+	radars := g.prepareRadarData(providers)
+	latencyDists := g.prepareLatencyDistributionData(providers)
+	testTypeData := g.prepareTestTypeData(providers)
+	scatterData := g.prepareScatterData(providers)
+	errorData := g.prepareErrorBreakdownData(providers)
+	heatmapData := g.prepareHeatmapData(providers)
+	showQuality := g.hasQualityScores()
+
+	// Build radar datasets
+	radarDatasets := ""
+	for i, p := range providers {
+		radarDatasets += fmt.Sprintf(`{
+                    label: '%s',
+                    data: [%s],
+                    backgroundColor: %s.replace("'", "").replace("'", "") + '33',
+                    borderColor: %s,
+                    pointBackgroundColor: %s,
+                    pointBorderColor: '#fff',
+                    pointHoverBackgroundColor: '#fff',
+                    pointHoverBorderColor: %s,
+                    borderWidth: 2
+                },`, capitalize(p),
+			formatFloatSlice([]float64{radars[i].SuccessRate, radars[i].SpeedScore, radars[i].CostEfficiency, radars[i].ContentScore, radars[i].QualityScore}),
+			baseColors[i%len(baseColors)], baseColors[i%len(baseColors)], baseColors[i%len(baseColors)], baseColors[i%len(baseColors)])
+	}
+	radarDatasets = strings.TrimSuffix(radarDatasets, ",")
+
+	// Latency distribution data prepared (used in chart script via latencyDists)
+
+	// Build test type datasets
+	testTypeDatasets := g.buildTestTypeDatasets(providers, testTypeData, baseColors)
+
+	// Build scatter datasets (one per provider)
+	scatterDatasets := ""
+	for i, p := range providers {
+		color := baseColors[i%len(baseColors)]
+		scatterDatasets += fmt.Sprintf(`{
+                    label: '%s',
+                    data: [{x: %f, y: %f, r: %f}],
+                    backgroundColor: %s,
+                    borderColor: %s,
+                    borderWidth: 2
+                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].QualityScore, scatterData[i].BubbleSize, color, color)
+	}
+	scatterDatasets = strings.TrimSuffix(scatterDatasets, ",")
+
+	// Build speed-quality scatter
+	speedQualityDatasets := ""
+	for i, p := range providers {
+		color := baseColors[i%len(baseColors)]
+		speedQualityDatasets += fmt.Sprintf(`{
+                    label: '%s',
+                    data: [{x: %f, y: %f, r: %f}],
+                    backgroundColor: %s,
+                    borderColor: %s,
+                    borderWidth: 2
+                },`, capitalize(p), scatterData[i].Speed, scatterData[i].QualityScore, scatterData[i].BubbleSize, color, color)
+	}
+	speedQualityDatasets = strings.TrimSuffix(speedQualityDatasets, ",")
+
+	// Build cost-speed scatter
+	costSpeedDatasets := ""
+	for i, p := range providers {
+		color := baseColors[i%len(baseColors)]
+		costSpeedDatasets += fmt.Sprintf(`{
+                    label: '%s',
+                    data: [{x: %f, y: %f, r: %f}],
+                    backgroundColor: %s,
+                    borderColor: %s,
+                    borderWidth: 2
+                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].Speed, scatterData[i].BubbleSize, color, color)
+	}
+	costSpeedDatasets = strings.TrimSuffix(costSpeedDatasets, ",")
+
+	// Build error breakdown datasets
+	errorDatasets := g.buildErrorDatasets(providers, errorData, baseColors)
+
+	// Heatmap generation
+	heatmapScript := g.generateHeatmapScript(providers, heatmapData)
+
+	qualityRadarLabel := ""
+	if showQuality {
+		qualityRadarLabel = ", 'Quality Score'"
+	}
+
+	return fmt.Sprintf(`
+        // Radar Chart - Provider Performance Profile
+        new Chart(document.getElementById('radarChart'), {
+            type: 'radar',
+            data: {
+                labels: ['Success Rate', 'Speed Score', 'Cost Efficiency', 'Content Volume'%s],
+                datasets: [%s]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Multi-Dimensional Performance Comparison (0-100, higher is better)' },
+                    legend: { position: 'bottom' }
+                },
+                scales: {
+                    r: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: { stepSize: 20 }
+                    }
+                }
+            }
+        });
+
+        // Latency Distribution Chart
+        new Chart(document.getElementById('latencyDistChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [
+                    {
+                        label: 'Min-P50 Range',
+                        data: [%s],
+                        backgroundColor: %s,
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'P50-P95 Range',
+                        data: [%s],
+                        backgroundColor: %s,
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'P95-Max Range',
+                        data: [%s],
+                        backgroundColor: %s,
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Latency Distribution: Min, P50, P95, Max (ms)' },
+                    legend: { display: true, position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const datasetIndex = context.datasetIndex;
+                                const dataIndex = context.dataIndex;
+                                const ranges = [%s];
+                                const range = ranges[dataIndex];
+                                return context.dataset.label + ': ' + range[datasetIndex] + 'ms';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: true },
+                    y: { 
+                        stacked: true,
+                        beginAtZero: true,
+                        title: { display: true, text: 'Milliseconds' }
+                    }
+                }
+            }
+        });
+
+        // Test Type Performance Chart
+        new Chart(document.getElementById('testTypeChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [%s]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Performance by Operation Type (Success Rate %%)' },
+                    legend: { position: 'bottom' }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: { display: true, text: 'Success Rate (%%)' }
+                    }
+                }
+            }
+        });
+
+        // Cost vs Quality Scatter Plot
+        new Chart(document.getElementById('costQualityScatter'), {
+            type: 'bubble',
+            data: { datasets: [%s] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Cost vs Quality Trade-off (Bubble size = Results count)' },
+                    legend: { display: true, position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': Cost $' + context.raw.x.toFixed(4) + ', Quality ' + context.raw.y.toFixed(1);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Cost per Result (USD)' },
+                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } }
+                    },
+                    y: {
+                        title: { display: true, text: 'Quality Score' },
+                        min: 0,
+                        max: 100
+                    }
+                }
+            }
+        });
+
+        // Speed vs Quality Scatter Plot
+        new Chart(document.getElementById('speedQualityScatter'), {
+            type: 'bubble',
+            data: { datasets: [%s] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Speed vs Quality Trade-off (Bubble size = Results count)' },
+                    legend: { display: true, position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': Speed ' + context.raw.x.toFixed(0) + 'ms, Quality ' + context.raw.y.toFixed(1);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Average Latency (ms)' },
+                        reverse: true
+                    },
+                    y: {
+                        title: { display: true, text: 'Quality Score' },
+                        min: 0,
+                        max: 100
+                    }
+                }
+            }
+        });
+
+        // Cost vs Speed Scatter Plot
+        new Chart(document.getElementById('costSpeedScatter'), {
+            type: 'bubble',
+            data: { datasets: [%s] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Cost vs Speed Trade-off (Bubble size = Success Rate)' },
+                    legend: { display: true, position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': Cost $' + context.raw.x.toFixed(4) + ', Speed ' + context.raw.y.toFixed(0) + 'ms';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Cost per Result (USD)' },
+                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } }
+                    },
+                    y: {
+                        title: { display: true, text: 'Average Latency (ms)' },
+                        reverse: true
+                    }
+                }
+            }
+        });
+
+        // Error Breakdown Chart
+        new Chart(document.getElementById('errorBreakdownChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [%s]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Error Distribution by Category' },
+                    legend: { position: 'bottom' }
+                },
+                scales: {
+                    x: { stacked: true },
+                    y: { 
+                        stacked: true,
+                        beginAtZero: true,
+                        title: { display: true, text: 'Number of Errors' }
+                    }
+                }
+            }
+        });
+
+%s`,
+		qualityRadarLabel, radarDatasets,
+		joinStrings(providerNames),
+		formatFloatSlice(latencyDistsToMinP50(latencyDists)), "'rgba(52, 152, 219, 0.8)'",
+		formatFloatSlice(latencyDistsToP50P95(latencyDists)), "'rgba(46, 204, 113, 0.8)'",
+		formatFloatSlice(latencyDistsToP95Max(latencyDists)), "'rgba(231, 76, 60, 0.8)'",
+		g.formatLatencyRanges(latencyDists),
+		joinStrings([]string{"'Search'", "'Extract'", "'Crawl'"}),
+		testTypeDatasets,
+		scatterDatasets,
+		speedQualityDatasets,
+		costSpeedDatasets,
+		joinStrings(providerNames),
+		errorDatasets,
+		heatmapScript)
 }
 
 func joinStrings(strs []string) string {
@@ -595,4 +964,600 @@ func formatIntSlice(nums []int) string {
 		result += fmt.Sprintf("%d", n)
 	}
 	return result
+}
+
+// Radar data structures
+type radarData struct {
+	SuccessRate    float64
+	SpeedScore     float64
+	CostEfficiency float64
+	ContentScore   float64
+	QualityScore   float64
+}
+
+// Latency distribution data
+type latencyDist struct {
+	Min float64
+	P50 float64
+	P95 float64
+	Max float64
+	Avg float64
+}
+
+// Test type data
+type testTypeMetrics struct {
+	SearchSuccessRate  float64
+	ExtractSuccessRate float64
+	CrawlSuccessRate   float64
+	SearchAvgLatency   float64
+	ExtractAvgLatency  float64
+	CrawlAvgLatency    float64
+}
+
+// Scatter plot data
+type scatterData struct {
+	CostPerResult float64
+	QualityScore  float64
+	Speed         float64
+	BubbleSize    float64
+	SuccessRate   float64
+}
+
+// Error breakdown data
+type errorBreakdown struct {
+	Timeout         int
+	RateLimit       int
+	Auth            int
+	Server5xx       int
+	Client4xx       int
+	Network         int
+	Parse           int
+	ContextCanceled int
+	Validation      int
+	Unknown         int
+}
+
+// Heatmap data
+type heatmapCell struct {
+	Provider string
+	TestName string
+	Score    float64
+	Category string // excellent, good, acceptable, poor
+}
+
+// prepareRadarData creates normalized data for the radar chart
+func (g *Generator) prepareRadarData(providers []string) []radarData {
+	data := make([]radarData, len(providers))
+
+	// Find max values for normalization
+	var maxLatency float64
+	var maxCost float64
+	var maxContent float64
+	var maxQuality float64
+
+	summaries := make([]*metrics.Summary, len(providers))
+	for i, p := range providers {
+		s := g.collector.ComputeSummary(p)
+		summaries[i] = s
+		if float64(s.AvgLatency.Milliseconds()) > maxLatency {
+			maxLatency = float64(s.AvgLatency.Milliseconds())
+		}
+		if s.CostPerResult > maxCost {
+			maxCost = s.CostPerResult
+		}
+		if s.AvgContentLength > maxContent {
+			maxContent = s.AvgContentLength
+		}
+		if s.AvgQualityScore > maxQuality {
+			maxQuality = s.AvgQualityScore
+		}
+	}
+
+	// Avoid division by zero
+	if maxLatency == 0 {
+		maxLatency = 1
+	}
+	if maxCost == 0 {
+		maxCost = 1
+	}
+	if maxContent == 0 {
+		maxContent = 1
+	}
+	if maxQuality == 0 {
+		maxQuality = 100
+	}
+
+	for i, s := range summaries {
+		data[i] = radarData{
+			SuccessRate:    s.SuccessRate,
+			SpeedScore:     (1 - float64(s.AvgLatency.Milliseconds())/maxLatency) * 100, // Inverse: faster = higher score
+			CostEfficiency: (1 - s.CostPerResult/maxCost) * 100,                         // Inverse: cheaper = higher score
+			ContentScore:   (s.AvgContentLength / maxContent) * 100,
+			QualityScore:   (s.AvgQualityScore / maxQuality) * 100,
+		}
+	}
+
+	return data
+}
+
+// prepareLatencyDistributionData creates latency distribution data
+func (g *Generator) prepareLatencyDistributionData(providers []string) []latencyDist {
+	data := make([]latencyDist, len(providers))
+
+	for i, p := range providers {
+		s := g.collector.ComputeSummary(p)
+		data[i] = latencyDist{
+			Min: float64(s.MinLatency.Milliseconds()),
+			P50: float64(s.P50Latency.Milliseconds()),
+			P95: float64(s.P95Latency.Milliseconds()),
+			Max: float64(s.MaxLatency.Milliseconds()),
+			Avg: float64(s.AvgLatency.Milliseconds()),
+		}
+	}
+
+	return data
+}
+
+// prepareTestTypeData creates test type breakdown data
+func (g *Generator) prepareTestTypeData(providers []string) []testTypeMetrics {
+	data := make([]testTypeMetrics, len(providers))
+
+	for i, p := range providers {
+		results := g.collector.GetResultsByProvider(p)
+
+		var searchSuccess, searchTotal int
+		var extractSuccess, extractTotal int
+		var crawlSuccess, crawlTotal int
+
+		var searchLatency time.Duration
+		var extractLatency time.Duration
+		var crawlLatency time.Duration
+
+		for _, r := range results {
+			switch r.TestType {
+			case "search":
+				searchTotal++
+				if r.Success {
+					searchSuccess++
+				}
+				searchLatency += r.Latency
+			case "extract":
+				extractTotal++
+				if r.Success {
+					extractSuccess++
+				}
+				extractLatency += r.Latency
+			case "crawl":
+				crawlTotal++
+				if r.Success {
+					crawlSuccess++
+				}
+				crawlLatency += r.Latency
+			}
+		}
+
+		data[i] = testTypeMetrics{
+			SearchSuccessRate:  calcSuccessRate(searchSuccess, searchTotal),
+			ExtractSuccessRate: calcSuccessRate(extractSuccess, extractTotal),
+			CrawlSuccessRate:   calcSuccessRate(crawlSuccess, crawlTotal),
+			SearchAvgLatency:   calcAvgLatency(searchLatency, searchTotal),
+			ExtractAvgLatency:  calcAvgLatency(extractLatency, extractTotal),
+			CrawlAvgLatency:    calcAvgLatency(crawlLatency, crawlTotal),
+		}
+	}
+
+	return data
+}
+
+func calcSuccessRate(success, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(success) / float64(total) * 100
+}
+
+func calcAvgLatency(total time.Duration, count int) float64 {
+	if count == 0 {
+		return 0
+	}
+	return float64(total.Milliseconds()) / float64(count)
+}
+
+// prepareScatterData creates data for scatter plots
+func (g *Generator) prepareScatterData(providers []string) []scatterData {
+	data := make([]scatterData, len(providers))
+
+	for i, p := range providers {
+		s := g.collector.ComputeSummary(p)
+		results := g.collector.GetResultsByProvider(p)
+
+		// Calculate total successful results for bubble size
+		var totalResults int
+		for _, r := range results {
+			if r.Success {
+				totalResults += r.ResultsCount
+			}
+		}
+
+		data[i] = scatterData{
+			CostPerResult: s.CostPerResult,
+			QualityScore:  s.AvgQualityScore,
+			Speed:         float64(s.AvgLatency.Milliseconds()),
+			BubbleSize:    float64(totalResults) * 2, // Scale bubble size
+			SuccessRate:   s.SuccessRate,
+		}
+	}
+
+	return data
+}
+
+// prepareErrorBreakdownData creates error categorization data
+func (g *Generator) prepareErrorBreakdownData(providers []string) []errorBreakdown {
+	data := make([]errorBreakdown, len(providers))
+
+	for i, p := range providers {
+		results := g.collector.GetResultsByProvider(p)
+		eb := &data[i]
+
+		for _, r := range results {
+			if r.Success {
+				continue
+			}
+
+			category := r.ErrorCategory
+			if category == "" && r.Error != "" {
+				category = "unknown"
+			}
+
+			switch category {
+			case "timeout":
+				eb.Timeout++
+			case "rate_limit":
+				eb.RateLimit++
+			case "auth":
+				eb.Auth++
+			case "server_5xx", "server":
+				eb.Server5xx++
+			case "client_4xx", "client":
+				eb.Client4xx++
+			case "network":
+				eb.Network++
+			case "parse":
+				eb.Parse++
+			case "context_canceled":
+				eb.ContextCanceled++
+			case "validation":
+				eb.Validation++
+			default:
+				eb.Unknown++
+			}
+		}
+	}
+
+	return data
+}
+
+// prepareHeatmapData creates performance heatmap data
+func (g *Generator) prepareHeatmapData(_ []string) []heatmapCell {
+	var cells []heatmapCell
+	tests := g.collector.GetAllTests()
+
+	for _, testName := range tests {
+		results := g.collector.GetResultsByTest(testName)
+
+		// Find max values for normalization
+		var maxLatency time.Duration
+		var maxCost float64
+		for _, r := range results {
+			if r.Success {
+				if r.Latency > maxLatency {
+					maxLatency = r.Latency
+				}
+				if r.CostUSD > maxCost {
+					maxCost = r.CostUSD
+				}
+			}
+		}
+
+		if maxLatency == 0 {
+			maxLatency = 1
+		}
+		if maxCost == 0 {
+			maxCost = 1
+		}
+
+		for _, r := range results {
+			score := calculateCompositeScore(r, maxLatency, maxCost)
+			cells = append(cells, heatmapCell{
+				Provider: r.Provider,
+				TestName: testName,
+				Score:    score,
+				Category: scoreToCategory(score),
+			})
+		}
+	}
+
+	return cells
+}
+
+func calculateCompositeScore(r metrics.Result, maxLatency time.Duration, maxCost float64) float64 {
+	if !r.Success {
+		return 0
+	}
+
+	// Combine success (40%), speed (30%), cost efficiency (30%)
+	successScore := 100.0
+	speedScore := (1 - float64(r.Latency)/float64(maxLatency)) * 100
+	costScore := (1 - r.CostUSD/maxCost) * 100
+
+	return successScore*0.4 + speedScore*0.3 + costScore*0.3
+}
+
+func scoreToCategory(score float64) string {
+	switch {
+	case score >= 80:
+		return "excellent"
+	case score >= 60:
+		return "good"
+	case score >= 40:
+		return "acceptable"
+	case score > 0:
+		return "poor"
+	default:
+		return "na"
+	}
+}
+
+// Helper functions for chart data formatting
+func latencyDistsToMinP50(dists []latencyDist) []float64 {
+	result := make([]float64, len(dists))
+	for i, d := range dists {
+		result[i] = d.P50 - d.Min
+	}
+	return result
+}
+
+func latencyDistsToP50P95(dists []latencyDist) []float64 {
+	result := make([]float64, len(dists))
+	for i, d := range dists {
+		result[i] = d.P95 - d.P50
+	}
+	return result
+}
+
+func latencyDistsToP95Max(dists []latencyDist) []float64 {
+	result := make([]float64, len(dists))
+	for i, d := range dists {
+		result[i] = d.Max - d.P95
+	}
+	return result
+}
+
+func (g *Generator) formatLatencyRanges(dists []latencyDist) string {
+	var parts []string
+	for _, d := range dists {
+		parts = append(parts, fmt.Sprintf("['%s', '%s', '%s']", formatLatency(d.Min), formatLatency(d.P50), formatLatency(d.Max)))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatLatency(ms float64) string {
+	return fmt.Sprintf("%.0fms", ms)
+}
+
+func (g *Generator) buildTestTypeDatasets(providers []string, data []testTypeMetrics, colors []string) string {
+	// Group by test type - one dataset per provider, grouped bars by test type
+	datasets := ""
+
+	for i, p := range providers {
+		color := colors[i%len(colors)]
+		datasets += fmt.Sprintf(`{
+                    label: '%s',
+                    data: [%f, %f, %f],
+                    backgroundColor: %s,
+                    borderRadius: 4
+                },`, capitalize(p), data[i].SearchSuccessRate, data[i].ExtractSuccessRate, data[i].CrawlSuccessRate, color)
+	}
+
+	return strings.TrimSuffix(datasets, ",")
+}
+
+func (g *Generator) buildErrorDatasets(providers []string, data []errorBreakdown, _ []string) string {
+	errorTypes := []struct {
+		name  string
+		color string
+	}{
+		{"Timeout", "'#e74c3c'"},
+		{"Rate Limit", "'#f39c12'"},
+		{"Auth", "'#9b59b6'"},
+		{"Server 5xx", "'#e67e22'"},
+		{"Client 4xx", "'#3498db'"},
+		{"Network", "'#1abc9c'"},
+		{"Parse", "'#95a5a6'"},
+		{"Context Canceled", "'#34495e'"},
+		{"Validation", "'#16a085'"},
+		{"Unknown", "'#7f8c8d'"},
+	}
+
+	datasets := ""
+	for _, et := range errorTypes {
+		values := make([]int, len(providers))
+		hasValues := false
+		for i := range providers {
+			switch et.name {
+			case "Timeout":
+				values[i] = data[i].Timeout
+			case "Rate Limit":
+				values[i] = data[i].RateLimit
+			case "Auth":
+				values[i] = data[i].Auth
+			case "Server 5xx":
+				values[i] = data[i].Server5xx
+			case "Client 4xx":
+				values[i] = data[i].Client4xx
+			case "Network":
+				values[i] = data[i].Network
+			case "Parse":
+				values[i] = data[i].Parse
+			case "Context Canceled":
+				values[i] = data[i].ContextCanceled
+			case "Validation":
+				values[i] = data[i].Validation
+			case "Unknown":
+				values[i] = data[i].Unknown
+			}
+			if values[i] > 0 {
+				hasValues = true
+			}
+		}
+
+		if hasValues {
+			datasets += fmt.Sprintf(`{
+                    label: '%s',
+                    data: [%s],
+                    backgroundColor: %s,
+                    borderRadius: 4
+                },`, et.name, formatIntSlice(values), et.color)
+		}
+	}
+
+	return strings.TrimSuffix(datasets, ",")
+}
+
+func (g *Generator) generateHeatmapScript(providers []string, cells []heatmapCell) string {
+	tests := g.collector.GetAllTests()
+	sort.Strings(tests)
+
+	// Build heatmap grid HTML
+	var html strings.Builder
+
+	html.WriteString(fmt.Sprintf(`<div class="heatmap-grid" style="grid-template-columns: 150px repeat(%d, 1fr);">`, len(tests)))
+
+	// Header row
+	html.WriteString(`<div class="heatmap-header"></div>`)
+	for _, test := range tests {
+		html.WriteString(fmt.Sprintf(`<div class="heatmap-header">%s</div>`, test))
+	}
+
+	// Data rows
+	for _, provider := range providers {
+		html.WriteString(fmt.Sprintf(`<div class="heatmap-provider"><span class="provider-badge provider-%s">%s</span></div>`, provider, capitalize(provider)))
+
+		for _, test := range tests {
+			// Find cell for this provider-test combination
+			var cell *heatmapCell
+			for i := range cells {
+				if cells[i].Provider == provider && cells[i].TestName == test {
+					cell = &cells[i]
+					break
+				}
+			}
+
+			if cell == nil {
+				html.WriteString(`<div class="heatmap-cell heatmap-na">N/A</div>`)
+			} else {
+				scoreText := fmt.Sprintf("%.0f", cell.Score)
+				html.WriteString(fmt.Sprintf(`<div class="heatmap-cell heatmap-%s" title="Score: %s">%s</div>`, cell.Category, scoreText, scoreText))
+			}
+		}
+	}
+
+	html.WriteString(`</div>`)
+
+	return fmt.Sprintf(`
+        // Performance Heatmap
+        document.getElementById('performanceHeatmap').innerHTML = %s;`, "`"+html.String()+"`")
+}
+
+// generateAdvancedAnalyticsSection creates the advanced analytics HTML section
+func (g *Generator) generateAdvancedAnalyticsSection() string {
+	providers := g.collector.GetAllProviders()
+	if len(providers) < 2 {
+		return ""
+	}
+
+	return `        <div class="advanced-section">
+            <h2>Advanced Analytics</h2>
+            <div class="advanced-subtitle">Multi-dimensional performance analysis & comparative insights</div>
+        </div>
+
+        <div class="section">
+            <h2>Provider Performance Profile (Radar Chart)</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper" style="height: 450px;">
+                    <canvas id="radarChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Latency Distribution Analysis</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="latencyDistChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Test Type Performance Comparison</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="testTypeChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Cost vs Quality Analysis</h2>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <div class="chart-wrapper">
+                        <canvas id="costQualityScatter"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-wrapper">
+                        <canvas id="speedQualityScatter"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Cost vs Speed Analysis</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="costSpeedScatter"></canvas>
+                </div>
+            </div>
+        </div>
+
+` + g.generateHeatmapSection() + g.generateErrorBreakdownSection()
+}
+
+// generateHeatmapSection creates the performance heatmap HTML
+func (g *Generator) generateHeatmapSection() string {
+	return `        <div class="section">
+            <h2>Performance Heatmap by Test Scenario</h2>
+            <div class="chart-container">
+                <div id="performanceHeatmap"></div>
+            </div>
+        </div>
+
+`
+}
+
+// generateErrorBreakdownSection creates the error breakdown chart HTML
+func (g *Generator) generateErrorBreakdownSection() string {
+	return `        <div class="section">
+            <h2>Error Breakdown by Category</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="errorBreakdownChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+`
 }
