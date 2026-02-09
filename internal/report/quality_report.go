@@ -165,7 +165,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 
 	// Write file
 	outputPath := filepath.Join(g.outputDir, "quality_report.md")
-	return os.WriteFile(outputPath, []byte(sb.String()), 0640)
+	return os.WriteFile(outputPath, []byte(sb.String()), 0600)
 }
 
 // GenerateQualityJSON creates a JSON report with quality metrics
@@ -195,7 +195,7 @@ func (g *QualityReportGenerator) GenerateQualityJSON() error {
 	}
 
 	outputPath := filepath.Join(g.outputDir, "quality_report.json")
-	return os.WriteFile(outputPath, jsonData, 0640)
+	return os.WriteFile(outputPath, jsonData, 0600)
 }
 
 // GenerateQualityHTML creates an HTML quality report
@@ -311,7 +311,7 @@ func (g *QualityReportGenerator) GenerateQualityHTML() error {
 </html>`
 
 	outputPath := filepath.Join(g.outputDir, "quality_report.html")
-	return os.WriteFile(outputPath, []byte(html), 0640)
+	return os.WriteFile(outputPath, []byte(html), 0600)
 }
 
 // Helper functions for quality reports

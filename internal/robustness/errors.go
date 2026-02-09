@@ -10,19 +10,33 @@ import (
 type ErrorCategory int
 
 const (
+	// ErrUnknown represents an unknown error category
 	ErrUnknown ErrorCategory = iota
+	// ErrTimeout represents a timeout error
 	ErrTimeout
+	// ErrRateLimit represents a rate limit error
 	ErrRateLimit
+	// ErrAuth represents an authentication error
 	ErrAuth
+	// ErrServer5xx represents a server 5xx error
 	ErrServer5xx
+	// ErrClient4xx represents a client 4xx error
 	ErrClient4xx
+	// ErrNetwork represents a network error
 	ErrNetwork
+	// ErrParse represents a parse error
 	ErrParse
+	// ErrContextCanceled represents a context canceled error
 	ErrContextCanceled
+	// ErrValidation represents a validation error
 	ErrValidation
+	// ErrNotFound represents a not found error
 	ErrNotFound
+	// ErrRedirect represents a redirect error
 	ErrRedirect
+	// ErrContentType represents a content type error
 	ErrContentType
+	// ErrSizeLimit represents a size limit error
 	ErrSizeLimit
 )
 
@@ -68,83 +82,129 @@ func CategorizeError(err error) (ErrorCategory, string) {
 
 	errStr := err.Error()
 
-	// Check for context cancellation first
+	// Check error categories in order of specificity
+	if cat, msg := checkContextErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkTimeoutErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkAuthErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkNotFoundErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkServerErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkClientErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkRedirectErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkNetworkErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkParseErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+	if cat, msg := checkContentErrors(errStr); cat != ErrUnknown {
+		return cat, msg
+	}
+
+	return ErrUnknown, errStr
+}
+
+func checkContextErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "context canceled") || contains(errStr, "context deadline exceeded") {
 		return ErrContextCanceled, "Request was canceled"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for timeout
+func checkTimeoutErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "timeout") || contains(errStr, "deadline exceeded") || contains(errStr, "i/o timeout") {
 		return ErrTimeout, "Request timed out"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for rate limiting
+func checkAuthErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "rate limit") || contains(errStr, "too many requests") || contains(errStr, "429") {
 		return ErrRateLimit, "Rate limit exceeded"
 	}
-
-	// Check for auth errors
 	if contains(errStr, "unauthorized") || contains(errStr, "authentication") ||
 		contains(errStr, "api key") || contains(errStr, "401") || contains(errStr, "403") {
 		return ErrAuth, "Authentication failed"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for not found
+func checkNotFoundErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "not found") || contains(errStr, "404") ||
 		contains(errStr, "no such host") || contains(errStr, "no extraction results") {
 		return ErrNotFound, "Resource not found"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for server errors
+func checkServerErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "500") || contains(errStr, "502") ||
 		contains(errStr, "503") || contains(errStr, "504") ||
 		contains(errStr, "internal server error") {
 		return ErrServer5xx, "Server error"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for client errors
+func checkClientErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "400") || contains(errStr, "405") ||
 		contains(errStr, "422") || contains(errStr, "bad request") {
 		return ErrClient4xx, "Client error"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for redirect issues
+func checkRedirectErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "redirect") || contains(errStr, "301") ||
 		contains(errStr, "302") || contains(errStr, "too many redirects") {
 		return ErrRedirect, "Redirect error"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for network errors
+func checkNetworkErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "connection refused") || contains(errStr, "connection reset") ||
 		contains(errStr, "no such host") || contains(errStr, "temporary failure") ||
 		contains(errStr, "network") || contains(errStr, "dial tcp") {
 		return ErrNetwork, "Network error"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for parse errors
+func checkParseErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "unmarshal") || contains(errStr, "parse") ||
 		contains(errStr, "invalid character") || contains(errStr, "json") {
 		return ErrParse, "Parse error"
 	}
+	return ErrUnknown, ""
+}
 
-	// Check for content type issues
+func checkContentErrors(errStr string) (ErrorCategory, string) {
 	if contains(errStr, "content type") || contains(errStr, "mime") {
 		return ErrContentType, "Content type error"
 	}
-
-	// Check for size limit
 	if contains(errStr, "size") || contains(errStr, "too large") ||
 		contains(errStr, "content too long") {
 		return ErrSizeLimit, "Size limit exceeded"
 	}
-
-	// Validation errors
 	if contains(errStr, "validation") || contains(errStr, "invalid") ||
 		contains(errStr, "missing") {
 		return ErrValidation, "Validation error"
 	}
-
-	return ErrUnknown, errStr
+	return ErrUnknown, ""
 }
 
 // ErrorStats tracks error statistics

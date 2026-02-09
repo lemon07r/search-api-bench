@@ -75,7 +75,7 @@ func (s *Scorer) ScoreSearch(ctx context.Context, query string, results []provid
 }
 
 // ScoreExtract performs quality scoring for extraction results
-func (s *Scorer) ScoreExtract(content string, url string, expectedContent []string) ExtractQualityScore {
+func (s *Scorer) ScoreExtract(content string, _ string, _ []string) ExtractQualityScore {
 	score := ExtractQualityScore{}
 
 	// 1. Content completeness (check for truncation indicators)
@@ -458,7 +458,7 @@ func (s *Scorer) assessMarkdownQuality(content string) float64 {
 }
 
 // assessContentFreshness extracts and scores date freshness
-func (s *Scorer) assessContentFreshness(content string) float64 {
+func (s *Scorer) assessContentFreshness(_ string) float64 {
 	// This is a simplified version - in production, use date extraction
 	// For now, return neutral score
 	return 70
@@ -641,9 +641,4 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
-}
-
-// timeNow returns current time
-func timeNow() time.Time {
-	return time.Now()
 }

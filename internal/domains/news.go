@@ -379,8 +379,5 @@ func extractDomainFromURL(sourceURL string) string {
 	if idx := strings.Index(sourceURL, ":"); idx != -1 {
 		sourceURL = sourceURL[:idx]
 	}
-	if strings.HasPrefix(sourceURL, "www.") {
-		sourceURL = sourceURL[4:]
-	}
-	return sourceURL
+	return strings.TrimPrefix(sourceURL, "www.")
 }

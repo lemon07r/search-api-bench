@@ -4,15 +4,25 @@ package quality
 type ErrorCategory int
 
 const (
+	// ErrUnknown represents an unknown error category
 	ErrUnknown ErrorCategory = iota
+	// ErrTimeout represents a timeout error
 	ErrTimeout
+	// ErrRateLimit represents a rate limit error
 	ErrRateLimit
+	// ErrAuth represents an authentication error
 	ErrAuth
+	// ErrServer5xx represents a server 5xx error
 	ErrServer5xx
+	// ErrClient4xx represents a client 4xx error
 	ErrClient4xx
+	// ErrNetwork represents a network error
 	ErrNetwork
+	// ErrParse represents a parse error
 	ErrParse
+	// ErrContextCanceled represents a context canceled error
 	ErrContextCanceled
+	// ErrValidation represents a validation error
 	ErrValidation
 )
 
@@ -248,12 +258,12 @@ func CalculateCrawlScore(scores CrawlQualityScore) float64 {
 	return clamp(total, 0, 100)
 }
 
-func clamp(v, min, max float64) float64 {
-	if v < min {
-		return min
+func clamp(v, minVal, maxVal float64) float64 { //nolint:unparam // maxVal is always 100 but kept for clarity
+	if v < minVal {
+		return minVal
 	}
-	if v > max {
-		return max
+	if v > maxVal {
+		return maxVal
 	}
 	return v
 }
