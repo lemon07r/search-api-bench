@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -14,7 +15,9 @@ func (g *Generator) GenerateHTML() error {
 	tests := g.collector.GetAllTests()
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
-	html := `<!DOCTYPE html>
+	var html strings.Builder
+
+	html.WriteString(`<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -49,6 +52,11 @@ func (g *Generator) GenerateHTML() error {
         .provider-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600; }
         .provider-firecrawl { background: #ff6b35; color: white; }
         .provider-tavily { background: #3498db; color: white; }
+        .provider-brave { background: #e74c3c; color: white; }
+        .provider-exa { background: #9b59b6; color: white; }
+        .provider-jina { background: #27ae60; color: white; }
+        .provider-mixedbread { background: #f39c12; color: white; }
+        .provider-local { background: #1abc9c; color: white; }
         .section { margin-bottom: 40px; }
         h2 { color: #2c3e50; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #3498db; }
     </style>
@@ -56,23 +64,35 @@ func (g *Generator) GenerateHTML() error {
 <body>
     <div class="container">
         <h1>Search API Benchmark Report</h1>
-        <p class="timestamp">Generated: ` + timestamp + `</p>
+        <p class="timestamp">Generated: `)
+	html.WriteString(timestamp)
+	html.WriteString(`</p>
         
         <div class="section">
             <div class="cards">
                 <div class="card">
                     <h3>Total Tests</h3>
-                    <div class="value">` + fmt.Sprintf("%d", len(tests)*len(providers)) + `</div>
-                    <div class="subtitle">Across ` + fmt.Sprintf("%d", len(providers)) + ` providers</div>
+                    <div class="value">`)
+	fmt.Fprintf(&html, "%d", len(tests)*len(providers))
+	html.WriteString(`</div>
+                    <div class="subtitle">Across `)
+	fmt.Fprintf(&html, "%d", len(providers))
+	html.WriteString(` providers</div>
                 </div>
                 <div class="card">
                     <h3>Providers Tested</h3>
-                    <div class="value">` + fmt.Sprintf("%d", len(providers)) + `</div>
-                    <div class="subtitle">` + joinProviders(providers) + `</div>
+                    <div class="value">`)
+	fmt.Fprintf(&html, "%d", len(providers))
+	html.WriteString(`</div>
+                    <div class="subtitle">`)
+	html.WriteString(joinProviders(providers))
+	html.WriteString(`</div>
                 </div>
                 <div class="card">
                     <h3>Test Scenarios</h3>
-                    <div class="value">` + fmt.Sprintf("%d", len(tests)) + `</div>
+                    <div class="value">`)
+	fmt.Fprintf(&html, "%d", len(tests))
+	html.WriteString(`</div>
                     <div class="subtitle">Search, Extract, Crawl</div>
                 </div>
             </div>
@@ -88,10 +108,28 @@ func (g *Generator) GenerateHTML() error {
         </div>
 
         <div class="section">
-            <h2>Cost Efficiency</h2>
+            <h2>Cost Efficiency - Total Credits</h2>
             <div class="chart-container">
                 <div class="chart-wrapper">
                     <canvas id="creditsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Cost Efficiency - Credits per Result</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="creditsPerResultChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Content Efficiency - Characters per Credit</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="charsPerCreditChart"></canvas>
                 </div>
             </div>
         </div>
@@ -119,21 +157,23 @@ func (g *Generator) GenerateHTML() error {
                     </tr>
                 </thead>
                 <tbody>
-` + g.generateTableRows() + `
-                </tbody>
+`)
+	html.WriteString(g.generateTableRows())
+	html.WriteString(`                </tbody>
             </table>
         </div>
     </div>
 
     <script>
-` + g.generateChartScripts() + `
-    </script>
+`)
+	html.WriteString(g.generateChartScripts())
+	html.WriteString(`    </script>
 </body>
-</html>`
+</html>`)
 
 	outputPath := filepath.Join(g.outputDir, "report.html")
 	// #nosec G306 - 0640 allows owner/group to read, which is appropriate for report files
-	return os.WriteFile(outputPath, []byte(html), 0640)
+	return os.WriteFile(outputPath, []byte(html.String()), 0640)
 }
 
 func joinProviders(providers []string) string {
@@ -205,6 +245,9 @@ func (g *Generator) generateChartScripts() string {
 	avgLatencies := make([]float64, len(providers))
 	totalCredits := make([]int, len(providers))
 	successRates := make([]float64, len(providers))
+	creditsPerResult := make([]float64, len(providers))
+	charsPerCredit := make([]float64, len(providers))
+	resultsPerCredit := make([]float64, len(providers))
 
 	baseColors := []string{"'#ff6b35'", "'#3498db'", "'#27ae60'", "'#9b59b6'", "'#e74c3c'", "'#f39c12'", "'#1abc9c'"}
 	colors := make([]string, len(providers))
@@ -220,6 +263,10 @@ func (g *Generator) generateChartScripts() string {
 		if summary.TotalTests > 0 {
 			successRates[i] = float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
 		}
+		// Efficiency metrics
+		creditsPerResult[i] = summary.CreditsPerResult
+		charsPerCredit[i] = summary.CharsPerCredit
+		resultsPerCredit[i] = summary.ResultsPerCredit
 	}
 
 	return fmt.Sprintf(`
@@ -293,17 +340,69 @@ func (g *Generator) generateChartScripts() string {
                     title: { display: true, text: 'Request Success Rate' }
                 },
                 scales: {
-                    y: { 
-                        beginAtZero: true, 
+                    y: {
+                        beginAtZero: true,
                         max: 100,
                         title: { display: true, text: 'Percentage' }
                     }
                 }
             }
         });
+
+        // Efficiency: Credits per Result (lower is better)
+        new Chart(document.getElementById('creditsPerResultChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [{
+                    label: 'Credits per Result',
+                    data: [%s],
+                    backgroundColor: [%s],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'Cost Efficiency: Credits per Result (lower is better)' }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Credits' } }
+                }
+            }
+        });
+
+        // Efficiency: Content per Credit (higher is better)
+        new Chart(document.getElementById('charsPerCreditChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [{
+                    label: 'Characters per Credit',
+                    data: [%s],
+                    backgroundColor: [%s],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'Content Efficiency: Characters per Credit (higher is better)' }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Characters' } }
+                }
+            }
+        });
 `, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
 		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors))
+		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors),
+		joinStrings(providerNames), formatFloatSlice(creditsPerResult), joinStrings(colors),
+		joinStrings(providerNames), formatFloatSlice(charsPerCredit), joinStrings(colors))
 }
 
 func joinStrings(strs []string) string {

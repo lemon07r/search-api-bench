@@ -114,11 +114,100 @@ func (g *Generator) GenerateMarkdown() error {
 	// Provider comparison
 	sb.WriteString("## Provider Comparison\n\n")
 
-	if len(providers) == 2 {
-		summary1 := g.collector.ComputeSummary(providers[0])
-		summary2 := g.collector.ComputeSummary(providers[1])
+	// Collect all summaries
+	type providerSummary struct {
+		name    string
+		summary *metrics.Summary
+	}
+	allSummaries := make([]providerSummary, 0, len(providers))
+	for _, provider := range providers {
+		allSummaries = append(allSummaries, providerSummary{
+			name:    provider,
+			summary: g.collector.ComputeSummary(provider),
+		})
+	}
 
-		sb.WriteString("### Speed Comparison\n\n")
+	// Show summary table for all providers
+	sb.WriteString("### Summary by Provider\n\n")
+	sb.WriteString("| Provider | Tests | Success Rate | Avg Latency | Total Credits | Avg Content |\n")
+	sb.WriteString("|----------|-------|--------------|-------------|---------------|-------------|\n")
+	for _, ps := range allSummaries {
+		successRate := float64(0)
+		if ps.summary.TotalTests > 0 {
+			successRate = float64(ps.summary.SuccessfulTests) / float64(ps.summary.TotalTests) * 100
+		}
+		sb.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %s | %d | %.0f chars |\n",
+			ps.name,
+			ps.summary.TotalTests,
+			successRate,
+			FormatLatency(ps.summary.AvgLatency),
+			ps.summary.TotalCreditsUsed,
+			ps.summary.AvgContentLength,
+		))
+	}
+	sb.WriteString("\n")
+
+	// Rankings (for 2+ providers)
+	if len(providers) >= 2 {
+		sb.WriteString("### Rankings\n\n")
+
+		// Speed ranking (by avg latency)
+		sb.WriteString("**Speed (by avg latency - lower is better):**\n")
+		sortedBySpeed := make([]providerSummary, len(allSummaries))
+		copy(sortedBySpeed, allSummaries)
+		for i := 0; i < len(sortedBySpeed); i++ {
+			for j := i + 1; j < len(sortedBySpeed); j++ {
+				if sortedBySpeed[i].summary.AvgLatency > sortedBySpeed[j].summary.AvgLatency {
+					sortedBySpeed[i], sortedBySpeed[j] = sortedBySpeed[j], sortedBySpeed[i]
+				}
+			}
+		}
+		for i, ps := range sortedBySpeed {
+			sb.WriteString(fmt.Sprintf("%d. **%s**: %s\n", i+1, ps.name, FormatLatency(ps.summary.AvgLatency)))
+		}
+		sb.WriteString("\n")
+
+		// Cost ranking (by total credits used)
+		sb.WriteString("**Cost (by total credits - lower is better):**\n")
+		sortedByCost := make([]providerSummary, len(allSummaries))
+		copy(sortedByCost, allSummaries)
+		for i := 0; i < len(sortedByCost); i++ {
+			for j := i + 1; j < len(sortedByCost); j++ {
+				if sortedByCost[i].summary.TotalCreditsUsed > sortedByCost[j].summary.TotalCreditsUsed {
+					sortedByCost[i], sortedByCost[j] = sortedByCost[j], sortedByCost[i]
+				}
+			}
+		}
+		for i, ps := range sortedByCost {
+			sb.WriteString(fmt.Sprintf("%d. **%s**: %d credits\n", i+1, ps.name, ps.summary.TotalCreditsUsed))
+		}
+		sb.WriteString("\n")
+
+		// Content ranking (by avg content length)
+		sb.WriteString("**Content Volume (by avg chars - higher is better):**\n")
+		sortedByContent := make([]providerSummary, len(allSummaries))
+		copy(sortedByContent, allSummaries)
+		for i := 0; i < len(sortedByContent); i++ {
+			for j := i + 1; j < len(sortedByContent); j++ {
+				if sortedByContent[i].summary.AvgContentLength < sortedByContent[j].summary.AvgContentLength {
+					sortedByContent[i], sortedByContent[j] = sortedByContent[j], sortedByContent[i]
+				}
+			}
+		}
+		for i, ps := range sortedByContent {
+			sb.WriteString(fmt.Sprintf("%d. **%s**: %.0f chars\n", i+1, ps.name, ps.summary.AvgContentLength))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Pairwise comparison for exactly 2 providers (original detailed comparison)
+	if len(providers) == 2 {
+		summary1 := allSummaries[0].summary
+		summary2 := allSummaries[1].summary
+
+		sb.WriteString("### Detailed Pairwise Comparison\n\n")
+
+		sb.WriteString("**Speed Comparison:**\n")
 		if summary1.AvgLatency > 0 && summary2.AvgLatency > 0 {
 			speedDiff := float64(summary2.AvgLatency-summary1.AvgLatency) / float64(summary1.AvgLatency) * 100
 			faster := providers[0]
@@ -131,7 +220,7 @@ func (g *Generator) GenerateMarkdown() error {
 		sb.WriteString(fmt.Sprintf("- %s avg latency: %s\n", providers[0], FormatLatency(summary1.AvgLatency)))
 		sb.WriteString(fmt.Sprintf("- %s avg latency: %s\n\n", providers[1], FormatLatency(summary2.AvgLatency)))
 
-		sb.WriteString("### Cost Comparison\n\n")
+		sb.WriteString("**Cost Comparison:**\n")
 		if summary1.TotalCreditsUsed > 0 && summary2.TotalCreditsUsed > 0 {
 			costDiff := float64(summary2.TotalCreditsUsed-summary1.TotalCreditsUsed) / float64(summary1.TotalCreditsUsed) * 100
 			cheaper := providers[0]
@@ -144,7 +233,7 @@ func (g *Generator) GenerateMarkdown() error {
 		sb.WriteString(fmt.Sprintf("- %s total credits: %d\n", providers[0], summary1.TotalCreditsUsed))
 		sb.WriteString(fmt.Sprintf("- %s total credits: %d\n\n", providers[1], summary2.TotalCreditsUsed))
 
-		sb.WriteString("### Content Volume Comparison\n\n")
+		sb.WriteString("**Content Volume Comparison:**\n")
 		if summary1.AvgContentLength > 0 && summary2.AvgContentLength > 0 {
 			contentDiff := (summary2.AvgContentLength - summary1.AvgContentLength) / summary1.AvgContentLength * 100
 			moreContent := providers[0]

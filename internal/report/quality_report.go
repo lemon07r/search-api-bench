@@ -244,6 +244,11 @@ func (g *QualityReportGenerator) GenerateQualityHTML() error {
         .provider-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600; }
         .provider-firecrawl { background: #ff6b35; color: white; }
         .provider-tavily { background: #3498db; color: white; }
+        .provider-brave { background: #e74c3c; color: white; }
+        .provider-exa { background: #9b59b6; color: white; }
+        .provider-jina { background: #27ae60; color: white; }
+        .provider-mixedbread { background: #f39c12; color: white; }
+        .provider-local { background: #1abc9c; color: white; }
         .section { margin-bottom: 40px; }
         h2 { color: #2c3e50; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #3498db; }
     </style>

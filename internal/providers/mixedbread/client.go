@@ -94,6 +94,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Search-API-Bench/1.0")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

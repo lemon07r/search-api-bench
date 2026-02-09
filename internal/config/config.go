@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -43,9 +45,28 @@ func (g GeneralConfig) TimeoutDuration() time.Duration {
 	return d
 }
 
+// validatePath checks for path traversal attempts
+func validatePath(path string) error {
+	// Clean the path
+	cleanPath := filepath.Clean(path)
+
+	// Check for path traversal sequences that go above current directory
+	// This prevents ../../../etc/passwd type attacks
+	if strings.HasPrefix(cleanPath, "..") || strings.Contains(cleanPath, "../") {
+		return fmt.Errorf("path contains invalid traversal sequence: %s", path)
+	}
+
+	return nil
+}
+
 // Load reads and parses the TOML configuration file
 func Load(path string) (*Config, error) {
-	// #nosec G304 - This is intentional file inclusion via variable for config loading
+	// Validate path for security
+	if err := validatePath(path); err != nil {
+		return nil, fmt.Errorf("invalid config path: %w", err)
+	}
+
+	// #nosec G304 - Path validated above, this is intentional file inclusion
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -92,7 +113,12 @@ func Load(path string) (*Config, error) {
 
 // Save writes the configuration to a TOML file
 func (c *Config) Save(path string) error {
-	// #nosec G304 - This is intentional file creation via variable for config saving
+	// Validate path for security
+	if err := validatePath(path); err != nil {
+		return fmt.Errorf("invalid config path: %w", err)
+	}
+
+	// #nosec G304 - Path validated above, this is intentional file creation
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %w", err)

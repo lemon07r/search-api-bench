@@ -32,7 +32,6 @@ type cliFlags struct {
 	providersFlag *string
 	format        *string
 	noProgress    *bool
-	verbose       *bool
 	debugMode     *bool
 	debugFullMode *bool
 	quickMode     *bool
@@ -47,7 +46,6 @@ func parseFlags() *cliFlags {
 		providersFlag: flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local, brave, exa, mixedbread, jina"),
 		format:        flag.String("format", "all", "Report format: all, html, md, json"),
 		noProgress:    flag.Bool("no-progress", false, "Disable progress bar (useful for CI)"),
-		verbose:       flag.Bool("verbose", false, "Enable verbose output with full error details"),
 		debugMode:     flag.Bool("debug", false, "Enable debug logging with request/response data"),
 		debugFullMode: flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
 		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
@@ -168,8 +166,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error running benchmarks: %v\n", err)
 		os.Exit(1)
 	}
-
-	_ = flags.verbose // Reserved for future use
 
 	// Finalize debug logging
 	if enableDebug {
