@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"time"
@@ -24,6 +23,7 @@ type Client struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	retryCfg   providers.RetryConfig
 }
 
 // NewClient creates a new Firecrawl client
@@ -39,6 +39,7 @@ func NewClient() (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		retryCfg: providers.DefaultRetryConfig(),
 	}, nil
 }
 
@@ -78,21 +79,9 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	var result searchResponse
@@ -149,21 +138,9 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	var result scrapeResponse
@@ -216,21 +193,9 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	var result crawlResponse
@@ -280,18 +245,9 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 		}
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-		resp, err := c.httpClient.Do(req)
+		body, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 		if err != nil {
 			return nil, fmt.Errorf("status request failed: %w", err)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			_ = resp.Body.Close()
-			return nil, fmt.Errorf("failed to read status response: %w", err)
-		}
-		if err := resp.Body.Close(); err != nil {
-			return nil, err
 		}
 
 		var status crawlStatusResponse
