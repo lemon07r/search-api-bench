@@ -203,10 +203,26 @@ func SleepWithContext(ctx context.Context, duration time.Duration) error {
 	}
 }
 
-// DoHTTPRequest executes an HTTP request with retry logic
-// Returns the response body and error (if any)
-func (rc *RetryConfig) DoHTTPRequest(ctx context.Context, client *http.Client, req *http.Request) ([]byte, error) {
-	var body []byte
+// HTTPResult contains detailed information about a completed HTTP request.
+type HTTPResult struct {
+	StatusCode int
+	Headers    http.Header
+	Body       []byte
+	Attempts   int
+}
+
+// DoHTTPRequestDetailed executes an HTTP request with retry logic and returns full response details.
+func (rc *RetryConfig) DoHTTPRequestDetailed(ctx context.Context, client *http.Client, req *http.Request) (*HTTPResult, error) {
+	var requestBody []byte
+	if req.Body != nil {
+		bodyData, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read request body: %w", err)
+		}
+		requestBody = bodyData
+		req.Body = io.NopCloser(bytes.NewReader(requestBody))
+	}
+
 	var lastErr error
 
 	for attempt := 0; attempt <= rc.MaxRetries; attempt++ {
@@ -217,16 +233,10 @@ func (rc *RetryConfig) DoHTTPRequest(ctx context.Context, client *http.Client, r
 		default:
 		}
 
-		// Clone request for retry (since body can only be read once)
+		// Clone request for retry.
 		reqClone := req.Clone(ctx)
-		if req.Body != nil {
-			// Read and restore body for retries
-			bodyData, err := io.ReadAll(req.Body)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read request body: %w", err)
-			}
-			req.Body = io.NopCloser(bytes.NewReader(bodyData))
-			reqClone.Body = io.NopCloser(bytes.NewReader(bodyData))
+		if requestBody != nil {
+			reqClone.Body = io.NopCloser(bytes.NewReader(requestBody))
 		}
 
 		resp, err := client.Do(reqClone)
@@ -245,7 +255,8 @@ func (rc *RetryConfig) DoHTTPRequest(ctx context.Context, client *http.Client, r
 			continue
 		}
 
-		body, err = io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		headers := resp.Header.Clone()
 		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response: %w", err)
@@ -270,8 +281,22 @@ func (rc *RetryConfig) DoHTTPRequest(ctx context.Context, client *http.Client, r
 		}
 
 		// Success
-		return body, nil
+		return &HTTPResult{
+			StatusCode: resp.StatusCode,
+			Headers:    headers,
+			Body:       body,
+			Attempts:   attempt + 1,
+		}, nil
 	}
 
 	return nil, fmt.Errorf("max retries (%d) exceeded: %w", rc.MaxRetries, lastErr)
+}
+
+// DoHTTPRequest executes an HTTP request with retry logic and returns only the response body.
+func (rc *RetryConfig) DoHTTPRequest(ctx context.Context, client *http.Client, req *http.Request) ([]byte, error) {
+	result, err := rc.DoHTTPRequestDetailed(ctx, client, req)
+	if err != nil {
+		return nil, err
+	}
+	return result.Body, nil
 }

@@ -114,20 +114,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Search-API-Bench/1.0")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
-	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	// Convert Mixedbread results to provider format
 	// Response structure: result.Data[].{Text, Score, Metadata.{Title, URL}}
@@ -151,7 +151,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
-		RawResponse:  respBody,
+		RawResponse:  resp.Body,
 	}, nil
 }
 
@@ -175,21 +175,22 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
-	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
+	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
 		return nil, err
 	}
+	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), time.Since(start))
 
 	// Convert HTML to markdown
-	content, err := md.ConvertString(string(respBody))
+	content, err := md.ConvertString(string(resp.Body))
 	if err != nil {
-		content = string(respBody)
+		content = string(resp.Body)
 	}
 
 	content = cleanContent(content)
 
 	// Extract title
-	title := extractTitle(string(respBody))
+	title := extractTitle(string(resp.Body))
 	if title == "" {
 		title = pageURL
 	}
