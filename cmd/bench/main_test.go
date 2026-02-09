@@ -10,7 +10,7 @@ import (
 )
 
 func TestParseProviders_All(t *testing.T) {
-	result := parseProviders("all")
+	result := parseProviders("all", false)
 	if len(result) != 7 {
 		t.Errorf("expected 7 providers for 'all', got %d", len(result))
 	}
@@ -23,7 +23,7 @@ func TestParseProviders_All(t *testing.T) {
 }
 
 func TestParseProviders_Single(t *testing.T) {
-	result := parseProviders("firecrawl")
+	result := parseProviders("firecrawl", false)
 	if len(result) != 1 {
 		t.Errorf("expected 1 provider, got %d", len(result))
 	}
@@ -33,7 +33,7 @@ func TestParseProviders_Single(t *testing.T) {
 }
 
 func TestParseProviders_List(t *testing.T) {
-	result := parseProviders("firecrawl,tavily")
+	result := parseProviders("firecrawl,tavily", false)
 	if len(result) != 2 {
 		t.Errorf("expected 2 providers, got %d", len(result))
 	}
@@ -43,7 +43,7 @@ func TestParseProviders_List(t *testing.T) {
 }
 
 func TestParseProviders_Empty(t *testing.T) {
-	result := parseProviders("")
+	result := parseProviders("", false)
 	if len(result) != 1 {
 		t.Errorf("expected 1 element for empty string, got %d", len(result))
 	}
