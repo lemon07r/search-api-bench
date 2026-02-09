@@ -245,6 +245,7 @@ func initializeProviders(providersFlag *string, noLocal bool, debugLogger *debug
 			}
 			provs = append(provs, client)
 			fmt.Printf("✓ Initialized Local crawler provider (no API key required)\n")
+			fmt.Printf("  Note: Local provider does not support search operations (extract/crawl only)\n")
 
 		case "brave":
 			client, err := brave.NewClient()

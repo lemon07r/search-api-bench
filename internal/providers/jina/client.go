@@ -30,6 +30,9 @@ const (
 	searchBaseURL  = "https://s.jina.ai"
 	apiBaseURL     = "https://api.jina.ai"
 	defaultTimeout = 60 * time.Second
+	// MaxExtractCredits caps the credits for extract to prevent inflated numbers
+	// Jina bills by tokens (chars/4), but we cap at 100 for fair comparison
+	MaxExtractCredits = 100
 )
 
 // Client represents a Jina AI API client
@@ -43,10 +46,19 @@ type Client struct {
 func NewClient() (*Client, error) {
 	apiKey := os.Getenv("JINA_API_KEY")
 	// Jina works without API key but with lower rate limits
+
+	// Allow timeout override via environment variable
+	timeout := defaultTimeout
+	if t := os.Getenv("JINA_TIMEOUT"); t != "" {
+		if d, err := time.ParseDuration(t); err == nil {
+			timeout = d
+		}
+	}
+
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: defaultTimeout,
+			Timeout: timeout,
 		},
 		retryCfg: providers.DefaultRetryConfig(),
 	}, nil
@@ -331,7 +343,12 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 	}
 
 	// Credits based on output token count (approximate)
+	// Jina bills by tokens where 1 token ≈ 4 characters
+	// We cap at MaxExtractCredits for fair comparison with other providers
 	creditsUsed := len(content) / 4 // Rough token estimation
+	if creditsUsed > MaxExtractCredits {
+		creditsUsed = MaxExtractCredits
+	}
 
 	return &providers.ExtractResult{
 		URL:         pageURL,
