@@ -115,9 +115,9 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
-			status := "✅ Pass"
+			status := "✓ Pass"
 			if !r.Success {
-				status = "❌ Fail"
+				status = "✗ Fail"
 			}
 
 			sb.WriteString(fmt.Sprintf("| %s | %.1f | %.1f | %.1f | %s |\n",
