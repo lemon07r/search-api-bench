@@ -2,10 +2,10 @@
 package robustness
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"strings"
-	"time"
 )
 
 // EdgeCase represents an edge case test scenario
@@ -18,15 +18,11 @@ type EdgeCase struct {
 }
 
 // EdgeCaseGenerator generates edge case test scenarios
-type EdgeCaseGenerator struct {
-	rng *rand.Rand
-}
+type EdgeCaseGenerator struct{}
 
 // NewEdgeCaseGenerator creates a new edge case generator
 func NewEdgeCaseGenerator() *EdgeCaseGenerator {
-	return &EdgeCaseGenerator{
-		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
-	}
+	return &EdgeCaseGenerator{}
 }
 
 // GenerateSearchEdgeCases returns a set of edge case search queries
@@ -363,7 +359,8 @@ func (g *EdgeCaseGenerator) generateLongQuery(length int) string {
 
 	var result strings.Builder
 	for result.Len() < length {
-		result.WriteString(words[g.rng.Intn(len(words))])
+		idx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(words))))
+		result.WriteString(words[idx.Int64()])
 		result.WriteString(" ")
 	}
 
@@ -374,7 +371,8 @@ func (g *EdgeCaseGenerator) generateLongURL() string {
 	base := "https://example.com/search?"
 	params := make([]string, 20)
 	for i := range params {
-		params[i] = fmt.Sprintf("param%d=value%d", i, g.rng.Intn(1000))
+		val, _ := rand.Int(rand.Reader, big.NewInt(1000))
+		params[i] = fmt.Sprintf("param%d=value%d", i, val.Int64())
 	}
 	return base + strings.Join(params, "&")
 }
@@ -393,13 +391,15 @@ func (g *EdgeCaseGenerator) GetRandomSubset(cases []EdgeCase, count int) []EdgeC
 		return cases
 	}
 
-	// Shuffle and take first n
+	// Fisher-Yates shuffle using crypto/rand
 	shuffled := make([]EdgeCase, len(cases))
 	copy(shuffled, cases)
 
-	g.rng.Shuffle(len(shuffled), func(i, j int) {
+	for i := len(shuffled) - 1; i > 0; i-- {
+		jBig, _ := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		j := int(jBig.Int64())
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-	})
+	}
 
 	return shuffled[:count]
 }

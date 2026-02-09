@@ -171,7 +171,7 @@ func assessSyntaxHighlighting(content string, languages []string) float64 {
 }
 
 // countFunctionSignatures counts function/method definitions
-func countFunctionSignatures(content string, languages []string) int {
+func countFunctionSignatures(content string, _ []string) int {
 	count := 0
 
 	// Go: func Name(
@@ -194,7 +194,7 @@ func countFunctionSignatures(content string, languages []string) int {
 }
 
 // countImportStatements counts import/include statements
-func countImportStatements(content string, languages []string) int {
+func countImportStatements(content string, _ []string) int {
 	count := 0
 
 	// Go: import
@@ -406,12 +406,12 @@ func (v *CodeValidator) collectIssues(result CodeValidationResult) []CodeIssue {
 }
 
 // clamp constrains value between min and max
-func clamp(v, min, max float64) float64 {
-	if v < min {
-		return min
+func clamp(v, minVal, maxVal float64) float64 { //nolint:unparam // minVal is always 0 but kept for clarity
+	if v < minVal {
+		return minVal
 	}
-	if v > max {
-		return max
+	if v > maxVal {
+		return maxVal
 	}
 	return v
 }

@@ -65,23 +65,11 @@ func (c *Comparison) CompareSearch(resultA, resultB metrics.Result, itemsA, item
 
 	// Compare latency
 	comp.LatencyDiff = resultA.Latency - resultB.Latency
-	if resultA.Latency < resultB.Latency {
-		comp.LatencyWinner = c.ProviderA
-	} else if resultB.Latency < resultA.Latency {
-		comp.LatencyWinner = c.ProviderB
-	} else {
-		comp.LatencyWinner = "tie"
-	}
+	comp.LatencyWinner = determineLatencyWinner(resultA.Latency, resultB.Latency, c.ProviderA, c.ProviderB)
 
 	// Compare cost
 	comp.CostDiff = resultA.CreditsUsed - resultB.CreditsUsed
-	if resultA.CreditsUsed < resultB.CreditsUsed {
-		comp.CostWinner = c.ProviderA
-	} else if resultB.CreditsUsed < resultA.CreditsUsed {
-		comp.CostWinner = c.ProviderB
-	} else {
-		comp.CostWinner = "tie"
-	}
+	comp.CostWinner = determineCostWinner(resultA.CreditsUsed, resultB.CreditsUsed, c.ProviderA, c.ProviderB)
 
 	// Determine overall winner
 	comp.OverallWinner = c.determineOverallWinner(comp)
@@ -104,35 +92,24 @@ func (c *Comparison) CompareExtract(resultA, resultB metrics.Result, contentA, c
 
 	// Compare latency
 	comp.LatencyDiff = resultA.Latency - resultB.Latency
-	if resultA.Latency < resultB.Latency {
-		comp.LatencyWinner = c.ProviderA
-	} else if resultB.Latency < resultA.Latency {
-		comp.LatencyWinner = c.ProviderB
-	} else {
-		comp.LatencyWinner = "tie"
-	}
+	comp.LatencyWinner = determineLatencyWinner(resultA.Latency, resultB.Latency, c.ProviderA, c.ProviderB)
 
 	// Compare cost
 	comp.CostDiff = resultA.CreditsUsed - resultB.CreditsUsed
-	if resultA.CreditsUsed < resultB.CreditsUsed {
-		comp.CostWinner = c.ProviderA
-	} else if resultB.CreditsUsed < resultA.CreditsUsed {
-		comp.CostWinner = c.ProviderB
-	} else {
-		comp.CostWinner = "tie"
-	}
+	comp.CostWinner = determineCostWinner(resultA.CreditsUsed, resultB.CreditsUsed, c.ProviderA, c.ProviderB)
 
 	// Compare content length
 	lenA := len(contentA)
 	lenB := len(contentB)
 
-	if lenA > lenB {
+	switch {
+	case lenA > lenB:
 		comp.QualityDiff = float64(lenA-lenB) / float64(lenB) * 100
 		comp.QualityWinner = c.ProviderA
-	} else if lenB > lenA {
+	case lenB > lenA:
 		comp.QualityDiff = float64(lenB-lenA) / float64(lenA) * 100
 		comp.QualityWinner = c.ProviderB
-	} else {
+	default:
 		comp.QualityWinner = "tie"
 	}
 
@@ -161,35 +138,24 @@ func (c *Comparison) CompareCrawl(resultA, resultB metrics.Result, pagesA, pages
 
 	// Compare latency
 	comp.LatencyDiff = resultA.Latency - resultB.Latency
-	if resultA.Latency < resultB.Latency {
-		comp.LatencyWinner = c.ProviderA
-	} else if resultB.Latency < resultA.Latency {
-		comp.LatencyWinner = c.ProviderB
-	} else {
-		comp.LatencyWinner = "tie"
-	}
+	comp.LatencyWinner = determineLatencyWinner(resultA.Latency, resultB.Latency, c.ProviderA, c.ProviderB)
 
 	// Compare cost
 	comp.CostDiff = resultA.CreditsUsed - resultB.CreditsUsed
-	if resultA.CreditsUsed < resultB.CreditsUsed {
-		comp.CostWinner = c.ProviderA
-	} else if resultB.CreditsUsed < resultA.CreditsUsed {
-		comp.CostWinner = c.ProviderB
-	} else {
-		comp.CostWinner = "tie"
-	}
+	comp.CostWinner = determineCostWinner(resultA.CreditsUsed, resultB.CreditsUsed, c.ProviderA, c.ProviderB)
 
 	// Compare page count
 	countA := len(pagesA)
 	countB := len(pagesB)
 
-	if countA > countB {
+	switch {
+	case countA > countB:
 		comp.QualityDiff = float64(countA-countB) / float64(countB) * 100
 		comp.QualityWinner = c.ProviderA
-	} else if countB > countA {
+	case countB > countA:
 		comp.QualityDiff = float64(countB-countA) / float64(countA) * 100
 		comp.QualityWinner = c.ProviderB
-	} else {
+	default:
 		comp.QualityWinner = "tie"
 	}
 
@@ -205,21 +171,23 @@ func (c *Comparison) determineOverallWinner(comp ComparisonResult) string {
 	scoreB := 0
 
 	// Latency (30%)
-	if comp.LatencyWinner == c.ProviderA {
+	switch comp.LatencyWinner {
+	case c.ProviderA:
 		scoreA += 30
-	} else if comp.LatencyWinner == c.ProviderB {
+	case c.ProviderB:
 		scoreB += 30
-	} else {
+	default:
 		scoreA += 15
 		scoreB += 15
 	}
 
 	// Cost (30%)
-	if comp.CostWinner == c.ProviderA {
+	switch comp.CostWinner {
+	case c.ProviderA:
 		scoreA += 30
-	} else if comp.CostWinner == c.ProviderB {
+	case c.ProviderB:
 		scoreB += 30
-	} else {
+	default:
 		scoreA += 15
 		scoreB += 15
 	}
@@ -228,32 +196,36 @@ func (c *Comparison) determineOverallWinner(comp ComparisonResult) string {
 	if comp.TestType == "search" || comp.TestType == "crawl" {
 		// For search/crawl: higher overlap is good, but also consider unique results
 		// Provider with more unique results gets bonus
-		if len(comp.UniqueToA) > len(comp.UniqueToB) {
+		switch {
+		case len(comp.UniqueToA) > len(comp.UniqueToB):
 			scoreA += 40
-		} else if len(comp.UniqueToB) > len(comp.UniqueToA) {
+		case len(comp.UniqueToB) > len(comp.UniqueToA):
 			scoreB += 40
-		} else {
+		default:
 			scoreA += 20
 			scoreB += 20
 		}
 	} else {
 		// For extract: higher quality/content wins
-		if comp.QualityWinner == c.ProviderA {
+		switch comp.QualityWinner {
+		case c.ProviderA:
 			scoreA += 40
-		} else if comp.QualityWinner == c.ProviderB {
+		case c.ProviderB:
 			scoreB += 40
-		} else {
+		default:
 			scoreA += 20
 			scoreB += 20
 		}
 	}
 
-	if scoreA > scoreB {
+	switch {
+	case scoreA > scoreB:
 		return c.ProviderA
-	} else if scoreB > scoreA {
+	case scoreB > scoreA:
 		return c.ProviderB
+	default:
+		return "tie"
 	}
-	return "tie"
 }
 
 // generateRecommendation creates a human-readable recommendation
@@ -405,4 +377,26 @@ func calculateContentSimilarity(contentA, contentB string) float64 {
 	}
 
 	return float64(intersection) / float64(union) * 100
+}
+
+func determineLatencyWinner(latencyA, latencyB time.Duration, providerA, providerB string) string {
+	switch {
+	case latencyA < latencyB:
+		return providerA
+	case latencyB < latencyA:
+		return providerB
+	default:
+		return "tie"
+	}
+}
+
+func determineCostWinner(costA, costB int, providerA, providerB string) string {
+	switch {
+	case costA < costB:
+		return providerA
+	case costB < costA:
+		return providerB
+	default:
+		return "tie"
+	}
 }
