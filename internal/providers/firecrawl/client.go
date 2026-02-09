@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
@@ -193,7 +195,7 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 // Leverages native capabilities: maxDepth, scrape options, exclude paths
 func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
-	maxPages, maxDepth := normalizeCrawlOptions(opts)
+	maxPages, maxDepth := normalizeCrawlOptions(url, opts)
 
 	payload := map[string]interface{}{
 		"url":      url,
@@ -267,19 +269,40 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}, nil
 }
 
-func normalizeCrawlOptions(opts providers.CrawlOptions) (maxPages int, maxDepth int) {
+func normalizeCrawlOptions(seedURL string, opts providers.CrawlOptions) (maxPages int, maxDepth int) {
 	maxPages = opts.MaxPages
 	if maxPages <= 0 {
 		maxPages = 1
 	}
 
 	maxDepth = opts.MaxDepth
-	// Firecrawl rejects deep seed URLs when maxDepth is zero.
-	if maxDepth < 1 {
-		maxDepth = 1
+	requiredDepth := minDepthForSeedURL(seedURL)
+	if maxDepth < requiredDepth {
+		maxDepth = requiredDepth
 	}
 
 	return maxPages, maxDepth
+}
+
+func minDepthForSeedURL(seedURL string) int {
+	const minDepth = 1
+
+	parsedURL, err := url.Parse(seedURL)
+	if err != nil {
+		return minDepth
+	}
+
+	path := strings.Trim(parsedURL.Path, "/")
+	if path == "" {
+		return minDepth
+	}
+
+	segments := strings.Split(path, "/")
+	if len(segments) < minDepth {
+		return minDepth
+	}
+
+	return len(segments)
 }
 
 func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Time) (*providers.CrawlResult, error) {

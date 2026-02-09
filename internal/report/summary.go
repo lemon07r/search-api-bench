@@ -52,6 +52,25 @@ type providerSummary struct {
 	summary *metrics.Summary
 }
 
+type testTypeQualityStats struct {
+	AvgQuality    float64 `json:"avg_quality"`
+	ScoredTests   int     `json:"scored_tests"`
+	ExecutedTests int     `json:"executed_tests"`
+}
+
+func (s testTypeQualityStats) CoveragePct() float64 {
+	if s.ExecutedTests == 0 {
+		return 0
+	}
+	return float64(s.ScoredTests) / float64(s.ExecutedTests) * 100
+}
+
+type providerQualityByTestType struct {
+	Search  testTypeQualityStats `json:"search"`
+	Extract testTypeQualityStats `json:"extract"`
+	Crawl   testTypeQualityStats `json:"crawl"`
+}
+
 // formatCostUSD formats a cost value in USD for display
 func formatCostUSD(cost float64) string {
 	if cost == 0 {
@@ -64,6 +83,82 @@ func formatCostUSD(cost float64) string {
 		return fmt.Sprintf("$%.4f", cost)
 	}
 	return fmt.Sprintf("$%.2f", cost)
+}
+
+func (g *Generator) computeProviderQualityByTestType(provider string) providerQualityByTestType {
+	results := g.collector.GetResultsByProvider(provider)
+	typeAccumulator := map[string]*testTypeQualityStats{
+		"search":  {},
+		"extract": {},
+		"crawl":   {},
+	}
+	typeTotals := map[string]float64{
+		"search":  0,
+		"extract": 0,
+		"crawl":   0,
+	}
+
+	for _, r := range results {
+		acc, ok := typeAccumulator[r.TestType]
+		if !ok || r.Skipped {
+			continue
+		}
+
+		acc.ExecutedTests++
+		if r.QualityScore > 0 {
+			acc.ScoredTests++
+			typeTotals[r.TestType] += r.QualityScore
+		}
+	}
+
+	for testType, acc := range typeAccumulator {
+		if acc.ScoredTests > 0 {
+			acc.AvgQuality = typeTotals[testType] / float64(acc.ScoredTests)
+		}
+	}
+
+	return providerQualityByTestType{
+		Search:  *typeAccumulator["search"],
+		Extract: *typeAccumulator["extract"],
+		Crawl:   *typeAccumulator["crawl"],
+	}
+}
+
+func formatQualityValue(stats testTypeQualityStats) string {
+	if stats.ScoredTests == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f", stats.AvgQuality)
+}
+
+func formatQualityCoverage(stats testTypeQualityStats) string {
+	if stats.ExecutedTests == 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%.1f%% (%d/%d)", stats.CoveragePct(), stats.ScoredTests, stats.ExecutedTests)
+}
+
+func (g *Generator) writeQualityByTestType(sb *strings.Builder, providers []string) {
+	sb.WriteString("### Quality by Test Type\n\n")
+	sb.WriteString("_Search quality uses semantic/reranker signals; extract and crawl quality use heuristic scoring._\n\n")
+	sb.WriteString("| Provider | Search Quality | Search Coverage | Extract Quality | Extract Coverage | Crawl Quality | Crawl Coverage |\n")
+	sb.WriteString("|----------|----------------|-----------------|-----------------|------------------|---------------|---------------|\n")
+
+	for _, provider := range providers {
+		byType := g.computeProviderQualityByTestType(provider)
+		fmt.Fprintf(
+			sb,
+			"| %s | %s | %s | %s | %s | %s | %s |\n",
+			provider,
+			formatQualityValue(byType.Search),
+			formatQualityCoverage(byType.Search),
+			formatQualityValue(byType.Extract),
+			formatQualityCoverage(byType.Extract),
+			formatQualityValue(byType.Crawl),
+			formatQualityCoverage(byType.Crawl),
+		)
+	}
+	sb.WriteString("\n")
 }
 
 // writeComparisonTable writes the comparison table for all providers
@@ -141,7 +236,7 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 	}
 	sb.WriteString("\n")
 
-	// Quality ranking (by avg quality score - higher is better) - only if quality scores exist
+	// Quality ranking - only if quality scores exist
 	hasQualityScores := false
 	for _, ps := range allSummaries {
 		if ps.summary.AvgQualityScore > 0 {
@@ -150,21 +245,6 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 		}
 	}
 	if hasQualityScores {
-		sb.WriteString("**Quality Score (by AI evaluation - higher is better):**\n")
-		sortedByQuality := make([]providerSummary, 0, len(allSummaries))
-		for _, ps := range allSummaries {
-			if ps.summary.AvgQualityScore > 0 {
-				sortedByQuality = append(sortedByQuality, ps)
-			}
-		}
-		sort.Slice(sortedByQuality, func(i, j int) bool {
-			return sortedByQuality[i].summary.AvgQualityScore > sortedByQuality[j].summary.AvgQualityScore
-		})
-		for i, ps := range sortedByQuality {
-			fmt.Fprintf(sb, "%d. **%s**: %.1f/100\n", i+1, ps.name, ps.summary.AvgQualityScore)
-		}
-		sb.WriteString("\n")
-
 		sb.WriteString("**Reliability-Adjusted Quality (quality x success x coverage):**\n")
 		sortedByAdjustedQuality := make([]providerSummary, len(allSummaries))
 		copy(sortedByAdjustedQuality, allSummaries)
@@ -180,6 +260,30 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 				ps.summary.ReliabilityAdjustedQuality,
 				ps.summary.AvgQualityScore,
 				ps.summary.SuccessRate,
+				ps.summary.QualityCoveragePct,
+			)
+		}
+		sb.WriteString("\n")
+
+		sb.WriteString("**Raw Quality Score (scored tests only):**\n")
+		sortedByQuality := make([]providerSummary, 0, len(allSummaries))
+		for _, ps := range allSummaries {
+			if ps.summary.AvgQualityScore > 0 {
+				sortedByQuality = append(sortedByQuality, ps)
+			}
+		}
+		sort.Slice(sortedByQuality, func(i, j int) bool {
+			return sortedByQuality[i].summary.AvgQualityScore > sortedByQuality[j].summary.AvgQualityScore
+		})
+		for i, ps := range sortedByQuality {
+			fmt.Fprintf(
+				sb,
+				"%d. **%s**: %.1f/100 (%d/%d scored, %.1f%% coverage)\n",
+				i+1,
+				ps.name,
+				ps.summary.AvgQualityScore,
+				ps.summary.ScoredTests,
+				ps.summary.ExecutedTests,
 				ps.summary.QualityCoveragePct,
 			)
 		}
@@ -385,6 +489,7 @@ func (g *Generator) GenerateMarkdown() error {
 
 	// Rankings (for 2+ providers)
 	g.writeRankings(&sb, providers)
+	g.writeQualityByTestType(&sb, providers)
 
 	// Pairwise comparison for exactly 2 providers (original detailed comparison)
 	g.writePairwiseComparison(&sb, providers)
@@ -406,10 +511,13 @@ func (g *Generator) GenerateJSON() error {
 
 	// Add summaries
 	summaries := make(map[string]*metrics.Summary)
+	qualityByTestType := make(map[string]providerQualityByTestType)
 	for _, provider := range g.collector.GetAllProviders() {
 		summaries[provider] = g.collector.ComputeSummary(provider)
+		qualityByTestType[provider] = g.computeProviderQualityByTestType(provider)
 	}
 	data["summaries"] = summaries
+	data["quality_by_test_type"] = qualityByTestType
 
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
