@@ -21,6 +21,9 @@ type Result struct {
 	ResultsCount  int           `json:"results_count"`
 	Timestamp     time.Time     `json:"timestamp"`
 
+	// Cost in USD (calculated from provider-specific pricing)
+	CostUSD float64 `json:"cost_usd"`
+
 	// Quality scores (0-100)
 	QualityScore      float64                `json:"quality_score,omitempty"`
 	SemanticScore     float64                `json:"semantic_score,omitempty"`
@@ -49,7 +52,12 @@ type Summary struct {
 	AvgContentLength   float64       `json:"avg_content_length"`
 	ResultsPerQuery    float64       `json:"results_per_query"`
 
-	// Efficiency metrics
+	// Cost metrics in USD
+	TotalCostUSD  float64 `json:"total_cost_usd"`   // total USD cost
+	AvgCostPerReq float64 `json:"avg_cost_per_req"` // average USD cost per request
+	CostPerResult float64 `json:"cost_per_result"`  // USD cost per successful result
+
+	// Efficiency metrics (kept for backward compatibility, but prefer CostUSD versions)
 	CreditsPerResult float64 `json:"credits_per_result"` // credits per successful result
 	CharsPerCredit   float64 `json:"chars_per_credit"`   // content chars per credit
 	ResultsPerCredit float64 `json:"results_per_credit"` // results per credit spent
@@ -138,12 +146,16 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 		ErrorBreakdown:   make(map[string]int),
 	}
 
+	// Initialize cost calculator for USD conversions
+	costCalc := NewCostCalculator()
+
 	var totalLatency time.Duration
 	var totalCredits int
 	var totalContentLength int
 	var totalResultsCount int
 	var totalQualityScore float64
 	var qualityScoreCount int
+	var totalCostUSD float64
 
 	latencies := make([]time.Duration, 0, len(results))
 
@@ -165,6 +177,10 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 		totalCredits += r.CreditsUsed
 		totalContentLength += r.ContentLength
 		totalResultsCount += r.ResultsCount
+
+		// Calculate USD cost for this result
+		costUSD := costCalc.CalculateProviderCost(provider, r.CreditsUsed, r.TestType)
+		totalCostUSD += costUSD
 
 		if r.Latency < summary.MinLatency {
 			summary.MinLatency = r.Latency
@@ -198,12 +214,19 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	summary.TotalContentLength = totalContentLength
 	summary.AvgContentLength = float64(totalContentLength) / float64(len(results))
 
+	// Calculate USD cost metrics
+	summary.TotalCostUSD = totalCostUSD
+	summary.AvgCostPerReq = totalCostUSD / float64(len(results))
+	if summary.SuccessfulTests > 0 {
+		summary.CostPerResult = totalCostUSD / float64(totalResultsCount)
+	}
+
 	if summary.TotalTests > 0 {
 		summary.SuccessRate = float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
 		summary.ResultsPerQuery = float64(totalResultsCount) / float64(summary.TotalTests)
 	}
 
-	// Calculate efficiency metrics
+	// Calculate efficiency metrics (kept for backward compatibility)
 	if summary.SuccessfulTests > 0 && totalCredits > 0 {
 		summary.CreditsPerResult = float64(totalCredits) / float64(totalResultsCount)
 		summary.ResultsPerCredit = float64(totalResultsCount) / float64(totalCredits)

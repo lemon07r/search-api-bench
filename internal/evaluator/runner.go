@@ -18,6 +18,9 @@ import (
 	"github.com/lamim/search-api-bench/internal/quality"
 )
 
+// costCalculator is used for USD cost calculations
+var costCalculator = metrics.NewCostCalculator()
+
 // Runner executes benchmark tests
 type Runner struct {
 	providers   []providers.Provider
@@ -161,6 +164,7 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 	result.Latency = searchResult.Latency
 	result.CreditsUsed = searchResult.CreditsUsed
 	result.ResultsCount = searchResult.TotalResults
+	result.CostUSD = costCalculator.CalculateProviderCost(prov.Name(), searchResult.CreditsUsed, "search")
 
 	// Log debug info
 	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
@@ -243,6 +247,7 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 	result.Latency = extractResult.Latency
 	result.CreditsUsed = extractResult.CreditsUsed
 	result.ContentLength = len(extractResult.Content)
+	result.CostUSD = costCalculator.CalculateProviderCost(prov.Name(), extractResult.CreditsUsed, "extract")
 
 	// Log debug info
 	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
@@ -311,6 +316,7 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	result.Latency = crawlResult.Latency
 	result.CreditsUsed = crawlResult.CreditsUsed
 	result.ResultsCount = crawlResult.TotalPages
+	result.CostUSD = costCalculator.CalculateProviderCost(prov.Name(), crawlResult.CreditsUsed, "crawl")
 
 	// Log debug info
 	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
