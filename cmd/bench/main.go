@@ -16,8 +16,12 @@ import (
 	"github.com/lamim/search-api-bench/internal/metrics"
 	"github.com/lamim/search-api-bench/internal/progress"
 	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/search-api-bench/internal/providers/brave"
+	"github.com/lamim/search-api-bench/internal/providers/exa"
 	"github.com/lamim/search-api-bench/internal/providers/firecrawl"
+	"github.com/lamim/search-api-bench/internal/providers/jina"
 	"github.com/lamim/search-api-bench/internal/providers/local"
+	"github.com/lamim/search-api-bench/internal/providers/mixedbread"
 	"github.com/lamim/search-api-bench/internal/providers/tavily"
 	"github.com/lamim/search-api-bench/internal/report"
 )
@@ -37,7 +41,7 @@ func parseFlags() *cliFlags {
 	return &cliFlags{
 		configPath:    flag.String("config", "config.toml", "Path to configuration file"),
 		outputDir:     flag.String("output", "", "Output directory for reports (overrides config)"),
-		providersFlag: flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local"),
+		providersFlag: flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local, brave, exa, mixedbread, jina"),
 		format:        flag.String("format", "all", "Report format: all, html, md, json"),
 		noProgress:    flag.Bool("no-progress", false, "Disable progress bar (useful for CI)"),
 		verbose:       flag.Bool("verbose", false, "Enable verbose output with full error details"),
@@ -158,7 +162,7 @@ func printBanner() {
 	fmt.Println(`
 ╔══════════════════════════════════════════════════════════════╗
 ║               Search API Benchmark Tool                      ║
-║         Compare Firecrawl vs Tavily Performance              ║
+║    Compare Firecrawl, Tavily, Brave, Exa, Mixedbread, Jina   ║
 ╚══════════════════════════════════════════════════════════════╝`)
 	fmt.Println()
 }
@@ -219,6 +223,46 @@ func initializeProviders(providersFlag *string, debugLogger *debug.Logger) []pro
 			}
 			provs = append(provs, client)
 			fmt.Printf("✓ Initialized Local crawler provider (no API key required)\n")
+
+		case "brave":
+			client, err := brave.NewClient()
+			debugLogger.LogProviderInit("brave", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Brave: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Brave Search provider\n")
+
+		case "exa":
+			client, err := exa.NewClient()
+			debugLogger.LogProviderInit("exa", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Exa: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Exa AI provider\n")
+
+		case "mixedbread":
+			client, err := mixedbread.NewClient()
+			debugLogger.LogProviderInit("mixedbread", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Mixedbread: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Mixedbread AI provider\n")
+
+		case "jina":
+			client, err := jina.NewClient()
+			debugLogger.LogProviderInit("jina", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Jina: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Jina AI provider (Reader + Search)\n")
 		}
 	}
 
@@ -264,7 +308,7 @@ func generateReports(formatFlag *string, collector *metrics.Collector, outputDir
 
 func parseProviders(s string) []string {
 	if s == "all" {
-		return []string{"firecrawl", "tavily", "local"}
+		return []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
 	}
 	return strings.Split(s, ",")
 }
