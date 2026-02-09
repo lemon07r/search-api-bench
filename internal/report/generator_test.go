@@ -340,7 +340,7 @@ func TestGenerateJSON_ValidJSON(t *testing.T) {
 	}
 }
 
-func TestGenerateMarkdown_IncludesReliabilityAdjustedQualityLeaderboard(t *testing.T) {
+func TestGenerateMarkdown_IncludesScoreFamilyRankings(t *testing.T) {
 	c := metrics.NewCollector()
 	c.AddResult(metrics.Result{
 		TestName:      "Search",
@@ -364,6 +364,27 @@ func TestGenerateMarkdown_IncludesReliabilityAdjustedQualityLeaderboard(t *testi
 		ResultsCount:  3,
 		QualityScore:  95,
 	})
+	c.AddResult(metrics.Result{
+		TestName:      "Extract",
+		Provider:      "provider1",
+		TestType:      "extract",
+		Success:       true,
+		Latency:       150 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 200,
+		QualityScore:  88,
+	})
+	c.AddResult(metrics.Result{
+		TestName:      "Crawl",
+		Provider:      "provider1",
+		TestType:      "crawl",
+		Success:       true,
+		Latency:       180 * time.Millisecond,
+		CreditsUsed:   1,
+		ContentLength: 300,
+		ResultsCount:  1,
+		QualityScore:  84,
+	})
 
 	tmpDir := t.TempDir()
 	gen := NewGenerator(c, tmpDir)
@@ -373,11 +394,14 @@ func TestGenerateMarkdown_IncludesReliabilityAdjustedQualityLeaderboard(t *testi
 
 	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.md"))
 	report := string(content)
-	if !strings.Contains(report, "Raw Quality Score (scored tests only):") {
-		t.Fatal("expected raw quality ranking section")
+	if !strings.Contains(report, "Search Relevance (model-assisted, search tests only):") {
+		t.Fatal("expected search relevance ranking section")
 	}
-	if !strings.Contains(report, "Reliability-Adjusted Quality (quality x success x coverage):") {
-		t.Fatal("expected reliability-adjusted quality section")
+	if !strings.Contains(report, "Extraction Heuristic (extract tests only):") {
+		t.Fatal("expected extraction heuristic ranking section")
+	}
+	if !strings.Contains(report, "Crawl Heuristic (crawl tests only):") {
+		t.Fatal("expected crawl heuristic ranking section")
 	}
 }
 
@@ -413,14 +437,14 @@ func TestGenerateMarkdown_IncludesQualityByTestTypeSection(t *testing.T) {
 
 	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.md"))
 	report := string(content)
-	if !strings.Contains(report, "### Quality by Test Type") {
-		t.Fatal("expected quality by test type section")
+	if !strings.Contains(report, "### Scoring by Test Type") {
+		t.Fatal("expected scoring by test type section")
 	}
-	if !strings.Contains(report, "| Provider | Search Quality | Search Coverage | Extract Quality | Extract Coverage | Crawl Quality | Crawl Coverage |") {
-		t.Fatal("expected quality by test type table header")
+	if !strings.Contains(report, "| Provider | Search Relevance | Search Coverage | Extract Heuristic | Extract Coverage | Crawl Heuristic | Crawl Coverage |") {
+		t.Fatal("expected scoring by test type table header")
 	}
 	if !strings.Contains(report, "| provider1 | 70.0 | 100.0% (1/1) | 90.0 | 100.0% (1/1) | - | 0.0% (0/1) |") {
-		t.Fatal("expected provider quality breakdown row")
+		t.Fatal("expected provider scoring breakdown row")
 	}
 }
 
@@ -449,7 +473,7 @@ func TestGenerateJSON_WritesFile(t *testing.T) {
 	}
 }
 
-func TestGenerateJSON_IncludesQualityByTestType(t *testing.T) {
+func TestGenerateJSON_IncludesScoringByTestType(t *testing.T) {
 	c := metrics.NewCollector()
 	c.AddResult(metrics.Result{
 		TestName:     "Search",
@@ -474,8 +498,11 @@ func TestGenerateJSON_IncludesQualityByTestType(t *testing.T) {
 	if err := json.Unmarshal(content, &payload); err != nil {
 		t.Fatalf("failed to unmarshal report JSON: %v", err)
 	}
+	if _, ok := payload["scoring_by_test_type"]; !ok {
+		t.Fatal("expected scoring_by_test_type in JSON report")
+	}
 	if _, ok := payload["quality_by_test_type"]; !ok {
-		t.Fatal("expected quality_by_test_type in JSON report")
+		t.Fatal("expected legacy quality_by_test_type alias in JSON report")
 	}
 }
 
@@ -497,11 +524,11 @@ func TestGenerateHTML_IncludesQualityByTestTypeSection(t *testing.T) {
 
 	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.html"))
 	html := string(content)
-	if !strings.Contains(html, "Quality by Test Type") {
-		t.Fatal("expected quality by test type section in HTML")
+	if !strings.Contains(html, "Scoring by Test Type") {
+		t.Fatal("expected scoring by test type section in HTML")
 	}
-	if !strings.Contains(html, "Search Quality") || !strings.Contains(html, "Extract Quality") || !strings.Contains(html, "Crawl Quality") {
-		t.Fatal("expected quality by type columns in HTML")
+	if !strings.Contains(html, "Search Relevance") || !strings.Contains(html, "Extract Heuristic") || !strings.Contains(html, "Crawl Heuristic") {
+		t.Fatal("expected scoring-by-type columns in HTML")
 	}
 }
 

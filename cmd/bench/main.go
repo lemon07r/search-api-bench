@@ -53,7 +53,7 @@ func parseFlags() *cliFlags {
 		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
 		noSearch:      flag.Bool("no-search", false, "Exclude search tests"),
 		noLocal:       flag.Bool("no-local", false, "Exclude local provider"),
-		qualityMode:   flag.Bool("quality", false, "Enable AI quality scoring (requires EMBEDDING_* and RERANKER_* env vars)"),
+		qualityMode:   flag.Bool("quality", false, "Enable relevance/scoring metrics (search model-assisted + extract/crawl heuristics; requires EMBEDDING_* and RERANKER_* env vars)"),
 	}
 }
 
@@ -137,7 +137,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: -quality flag set but failed to initialize: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("🎯 Quality scoring enabled: using embedding + reranker models")
+		fmt.Println("🎯 Scoring enabled: search relevance uses embedding + reranker; extract/crawl use heuristics")
 		fmt.Println()
 	}
 

@@ -219,8 +219,8 @@ func (g *Generator) generateQualitySection() string {
 		return ""
 	}
 	return `        <div class="section">
-            <h2>AI Quality Score</h2>
-            <p class="quality-note">Search quality uses semantic + reranker signals. Extract and crawl use heuristic quality metrics. Raw quality averages only scored tests.</p>
+            <h2>Scoring Overview</h2>
+            <p class="quality-note">Search relevance uses model-assisted signals. Extract and crawl use rule-based heuristics. These score families are reported separately.</p>
             <div class="chart-container">
                 <div class="chart-wrapper">
                     <canvas id="qualityChart"></canvas>
@@ -262,17 +262,17 @@ func (g *Generator) generateQualityByTestTypeSection() string {
 
 	return `
         <div class="section">
-            <h2>Quality by Test Type</h2>
-            <p class="quality-note">Search quality uses semantic/reranker signals; extract and crawl quality use heuristic scoring.</p>
+            <h2>Scoring by Test Type</h2>
+            <p class="quality-note">Search relevance uses model signals; extract and crawl scores are heuristic diagnostics.</p>
             <table>
                 <thead>
                     <tr>
                         <th>Provider</th>
-                        <th>Search Quality</th>
+                        <th>Search Relevance</th>
                         <th>Search Coverage</th>
-                        <th>Extract Quality</th>
+                        <th>Extract Heuristic</th>
                         <th>Extract Coverage</th>
-                        <th>Crawl Quality</th>
+                        <th>Crawl Heuristic</th>
                         <th>Crawl Coverage</th>
                     </tr>
                 </thead>
@@ -289,9 +289,10 @@ func (g *Generator) generateQualityTableHeader() string {
 	if !g.hasQualityScores() {
 		return ""
 	}
-	return `                        <th>Quality</th>
-                        <th>Semantic</th>
-                        <th>Reranker</th>`
+	return `                        <th>Score Family</th>
+                        <th>Score</th>
+                        <th>Semantic (Search)</th>
+                        <th>Reranker (Search)</th>`
 }
 
 func (g *Generator) generateTableRows() string {
@@ -344,6 +345,7 @@ func (g *Generator) generateTableRows() string {
 				if r.QualityScore > 0 {
 					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
 				}
+				scoreFamily := scoreLabelForTestType(r.TestType)
 				semanticStr := "-"
 				if r.SemanticScore > 0 {
 					semanticStr = fmt.Sprintf("%.1f", r.SemanticScore)
@@ -362,8 +364,9 @@ func (g *Generator) generateTableRows() string {
                         <td>%s</td>
                         <td>%s</td>
                         <td>%s</td>
+                        <td>%s</td>
                     </tr>
-`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), costStr, details, qualityStr, semanticStr, rerankerStr)
+`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), costStr, details, scoreFamily, qualityStr, semanticStr, rerankerStr)
 			} else {
 				rows += fmt.Sprintf(`                    <tr>
                         <td>%s</td>
@@ -388,8 +391,9 @@ func (g *Generator) generateChartScripts() string {
 	providerNames := make([]string, len(providers))
 	avgLatencies := make([]float64, len(providers))
 	successRates := make([]float64, len(providers))
-	avgQualityScores := make([]float64, len(providers))
-	reliabilityAdjustedQuality := make([]float64, len(providers))
+	searchRelevanceScores := make([]float64, len(providers))
+	extractHeuristicScores := make([]float64, len(providers))
+	crawlHeuristicScores := make([]float64, len(providers))
 	// USD cost metrics
 	totalCostUSD := make([]float64, len(providers))
 
@@ -403,32 +407,40 @@ func (g *Generator) generateChartScripts() string {
 
 	for i, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
+		byType := g.computeProviderQualityByTestType(provider)
 		providerNames[i] = "'" + capitalize(provider) + "'"
 		avgLatencies[i] = float64(summary.AvgLatency.Milliseconds())
 		successRates[i] = summary.SuccessRate
-		avgQualityScores[i] = summary.AvgQualityScore
-		reliabilityAdjustedQuality[i] = summary.ReliabilityAdjustedQuality
+		searchRelevanceScores[i] = byType.Search.AvgQuality
+		extractHeuristicScores[i] = byType.Extract.AvgQuality
+		crawlHeuristicScores[i] = byType.Crawl.AvgQuality
 		// USD cost metrics
 		totalCostUSD[i] = summary.TotalCostUSD
 	}
 
-	qualityChartScript := ""
+	scoreChartScript := ""
 	if showQuality {
-		qualityChartScript = fmt.Sprintf(`
-        // Quality Score Chart
+		scoreChartScript = fmt.Sprintf(`
+        // Score Chart (separate score families)
         new Chart(document.getElementById('qualityChart'), {
             type: 'bar',
             data: {
                 labels: [%s],
                 datasets: [
                     {
-                        label: 'Raw Avg Quality (scored tests only)',
+                        label: 'Search Relevance',
                         data: [%s],
                         backgroundColor: [%s],
                         borderRadius: 4
                     },
                     {
-                        label: 'Reliability-Adjusted Quality',
+                        label: 'Extract Heuristic',
+                        data: [%s],
+                        backgroundColor: 'rgba(52, 152, 219, 0.65)',
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'Crawl Heuristic',
                         data: [%s],
                         backgroundColor: 'rgba(44, 62, 80, 0.65)',
                         borderRadius: 4
@@ -440,23 +452,23 @@ func (g *Generator) generateChartScripts() string {
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: true, position: 'bottom' },
-                    title: { display: true, text: 'Quality (raw vs reliability-adjusted)' }
+                    title: { display: true, text: 'Scores by Type (no blended single score)' }
                 },
                 scales: {
                     y: {
                         beginAtZero: true,
                         max: 100,
-                        title: { display: true, text: 'Quality Score' }
+                        title: { display: true, text: 'Score' }
                     }
                 }
             }
         });
-`, joinStrings(providerNames), formatFloatSlice(avgQualityScores), joinStrings(colors), formatFloatSlice(reliabilityAdjustedQuality))
+`, joinStrings(providerNames), formatFloatSlice(searchRelevanceScores), joinStrings(colors), formatFloatSlice(extractHeuristicScores), formatFloatSlice(crawlHeuristicScores))
 	}
 
 	advancedScripts := g.generateAdvancedChartScripts(providers, providerNames, colors, baseColors)
 
-	return qualityChartScript + fmt.Sprintf(`
+	return scoreChartScript + fmt.Sprintf(`
         // Latency Chart
         new Chart(document.getElementById('latencyChart'), {
             type: 'bar',
@@ -578,7 +590,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     pointHoverBorderColor: %s,
                     borderWidth: 2
                 },`, capitalize(p),
-			formatFloatSlice([]float64{radars[i].SuccessRate, radars[i].SpeedScore, radars[i].CostEfficiency, radars[i].ContentScore, radars[i].QualityScore}),
+			formatFloatSlice([]float64{radars[i].SuccessRate, radars[i].SpeedScore, radars[i].CostEfficiency, radars[i].ContentScore, radars[i].SearchRelevanceScore}),
 			baseColors[i%len(baseColors)], baseColors[i%len(baseColors)], baseColors[i%len(baseColors)], baseColors[i%len(baseColors)])
 	}
 	radarDatasets = strings.TrimSuffix(radarDatasets, ",")
@@ -595,7 +607,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     backgroundColor: %s,
                     borderColor: %s,
                     borderWidth: 2
-                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].QualityScore, scatterData[i].BubbleSize, color, color)
+                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].SearchRelevance, scatterData[i].BubbleSize, color, color)
 	}
 	scatterDatasets = strings.TrimSuffix(scatterDatasets, ",")
 
@@ -609,7 +621,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     backgroundColor: %s,
                     borderColor: %s,
                     borderWidth: 2
-                },`, capitalize(p), scatterData[i].Speed, scatterData[i].QualityScore, scatterData[i].BubbleSize, color, color)
+                },`, capitalize(p), scatterData[i].Speed, scatterData[i].SearchRelevance, scatterData[i].BubbleSize, color, color)
 	}
 	speedQualityDatasets = strings.TrimSuffix(speedQualityDatasets, ",")
 
@@ -633,9 +645,9 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 	// Heatmap generation
 	heatmapScript := g.generateHeatmapScript(providers, heatmapData)
 
-	qualityRadarLabel := ""
+	searchRelevanceRadarLabel := ""
 	if showQuality {
-		qualityRadarLabel = ", 'Quality Score'"
+		searchRelevanceRadarLabel = ", 'Search Relevance'"
 	}
 
 	return fmt.Sprintf(`
@@ -718,7 +730,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             }
         });
 
-        // Cost vs Quality Scatter Plot
+        // Cost vs Search Relevance Scatter Plot
         new Chart(document.getElementById('costQualityScatter'), {
             type: 'bubble',
             data: { datasets: [%s] },
@@ -727,12 +739,12 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 maintainAspectRatio: false,
                 layout: { padding: 30 },
                 plugins: {
-                    title: { display: true, text: 'Cost vs Quality Trade-off (Bubble size = Results count)' },
+                    title: { display: true, text: 'Cost vs Search Relevance (Bubble size = Results count)' },
                     legend: { display: true, position: 'bottom' },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return context.dataset.label + ': Cost $' + context.raw.x.toFixed(4) + ', Quality ' + context.raw.y.toFixed(1);
+                                return context.dataset.label + ': Cost $' + context.raw.x.toFixed(4) + ', Search relevance ' + context.raw.y.toFixed(1);
                             }
                         }
                     }
@@ -743,7 +755,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                         ticks: { callback: function(v) { return '$' + v.toFixed(4); } }
                     },
                     y: {
-                        title: { display: true, text: 'Quality Score' },
+                        title: { display: true, text: 'Search Relevance' },
                         min: 0,
                         max: 110
                     }
@@ -751,7 +763,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             }
         });
 
-        // Speed vs Quality Scatter Plot
+        // Speed vs Search Relevance Scatter Plot
         new Chart(document.getElementById('speedQualityScatter'), {
             type: 'bubble',
             data: { datasets: [%s] },
@@ -760,12 +772,12 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 maintainAspectRatio: false,
                 layout: { padding: 30 },
                 plugins: {
-                    title: { display: true, text: 'Speed vs Quality Trade-off (Bubble size = Results count)' },
+                    title: { display: true, text: 'Speed vs Search Relevance (Bubble size = Results count)' },
                     legend: { display: true, position: 'bottom' },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return context.dataset.label + ': Speed ' + context.raw.x.toFixed(0) + 'ms, Quality ' + context.raw.y.toFixed(1);
+                                return context.dataset.label + ': Speed ' + context.raw.x.toFixed(0) + 'ms, Search relevance ' + context.raw.y.toFixed(1);
                             }
                         }
                     }
@@ -776,7 +788,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                         reverse: true
                     },
                     y: {
-                        title: { display: true, text: 'Quality Score' },
+                        title: { display: true, text: 'Search Relevance' },
                         min: 0,
                         max: 110
                     }
@@ -842,7 +854,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
         });
 
 %s`,
-		qualityRadarLabel, radarDatasets,
+		searchRelevanceRadarLabel, radarDatasets,
 		joinStrings(providerNames),
 		formatFloatSlice(latencyDistsToMinP50(latencyDists)), "'rgba(52, 152, 219, 0.8)'",
 		formatFloatSlice(latencyDistsToP50P95(latencyDists)), "'rgba(46, 204, 113, 0.8)'",
@@ -894,11 +906,11 @@ func formatIntSlice(nums []int) string {
 
 // Radar data structures
 type radarData struct {
-	SuccessRate    float64
-	SpeedScore     float64
-	CostEfficiency float64
-	ContentScore   float64
-	QualityScore   float64
+	SuccessRate          float64
+	SpeedScore           float64
+	CostEfficiency       float64
+	ContentScore         float64
+	SearchRelevanceScore float64
 }
 
 // Latency distribution data
@@ -912,11 +924,11 @@ type latencyDist struct {
 
 // Scatter plot data
 type scatterData struct {
-	CostPerResult float64
-	QualityScore  float64
-	Speed         float64
-	BubbleSize    float64
-	SuccessRate   float64
+	CostPerResult   float64
+	SearchRelevance float64
+	Speed           float64
+	BubbleSize      float64
+	SuccessRate     float64
 }
 
 // Error breakdown data
@@ -949,12 +961,15 @@ func (g *Generator) prepareRadarData(providers []string) []radarData {
 	var maxLatency float64
 	var maxCost float64
 	var maxContent float64
-	var maxQuality float64
+	var maxSearchRelevance float64
 
 	summaries := make([]*metrics.Summary, len(providers))
+	searchRelevanceScores := make([]float64, len(providers))
 	for i, p := range providers {
 		s := g.collector.ComputeSummary(p)
+		byType := g.computeProviderQualityByTestType(p)
 		summaries[i] = s
+		searchRelevanceScores[i] = byType.Search.AvgQuality
 		if float64(s.AvgLatency.Milliseconds()) > maxLatency {
 			maxLatency = float64(s.AvgLatency.Milliseconds())
 		}
@@ -964,8 +979,8 @@ func (g *Generator) prepareRadarData(providers []string) []radarData {
 		if s.AvgContentLength > maxContent {
 			maxContent = s.AvgContentLength
 		}
-		if s.AvgQualityScore > maxQuality {
-			maxQuality = s.AvgQualityScore
+		if searchRelevanceScores[i] > maxSearchRelevance {
+			maxSearchRelevance = searchRelevanceScores[i]
 		}
 	}
 
@@ -979,17 +994,17 @@ func (g *Generator) prepareRadarData(providers []string) []radarData {
 	if maxContent == 0 {
 		maxContent = 1
 	}
-	if maxQuality == 0 {
-		maxQuality = 100
+	if maxSearchRelevance == 0 {
+		maxSearchRelevance = 100
 	}
 
 	for i, s := range summaries {
 		data[i] = radarData{
-			SuccessRate:    s.SuccessRate,
-			SpeedScore:     (1 - float64(s.AvgLatency.Milliseconds())/maxLatency) * 100, // Inverse: faster = higher score
-			CostEfficiency: (1 - s.CostPerResult/maxCost) * 100,                         // Inverse: cheaper = higher score
-			ContentScore:   (s.AvgContentLength / maxContent) * 100,
-			QualityScore:   (s.AvgQualityScore / maxQuality) * 100,
+			SuccessRate:          s.SuccessRate,
+			SpeedScore:           (1 - float64(s.AvgLatency.Milliseconds())/maxLatency) * 100, // Inverse: faster = higher score
+			CostEfficiency:       (1 - s.CostPerResult/maxCost) * 100,                         // Inverse: cheaper = higher score
+			ContentScore:         (s.AvgContentLength / maxContent) * 100,
+			SearchRelevanceScore: (searchRelevanceScores[i] / maxSearchRelevance) * 100,
 		}
 	}
 
@@ -1031,11 +1046,11 @@ func (g *Generator) prepareScatterData(providers []string) []scatterData {
 		}
 
 		data[i] = scatterData{
-			CostPerResult: s.CostPerResult,
-			QualityScore:  s.AvgQualityScore,
-			Speed:         float64(s.AvgLatency.Milliseconds()),
-			BubbleSize:    float64(totalResults) * 2, // Scale bubble size
-			SuccessRate:   s.SuccessRate,
+			CostPerResult:   s.CostPerResult,
+			SearchRelevance: g.computeProviderQualityByTestType(p).Search.AvgQuality,
+			Speed:           float64(s.AvgLatency.Milliseconds()),
+			BubbleSize:      float64(totalResults) * 2, // Scale bubble size
+			SuccessRate:     s.SuccessRate,
 		}
 	}
 
@@ -1334,7 +1349,7 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
         </div>
 
         <div class="section">
-            <h2>Cost vs Quality Analysis</h2>
+            <h2>Cost vs Search Relevance</h2>
             <div class="chart-container">
                 <div class="chart-wrapper" style="height: 400px;">
                     <canvas id="costQualityScatter"></canvas>
@@ -1343,7 +1358,7 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
         </div>
 
         <div class="section">
-            <h2>Speed vs Quality Analysis</h2>
+            <h2>Speed vs Search Relevance</h2>
             <div class="chart-container">
                 <div class="chart-wrapper" style="height: 400px;">
                     <canvas id="speedQualityScatter"></canvas>

@@ -1,6 +1,6 @@
 # Search API Benchmark
 
-A Go CLI for benchmarking web `search`, `extract`, and `crawl` capabilities across multiple providers with consistent tests, latency/cost metrics, and optional AI quality scoring.
+A Go CLI for benchmarking web `search`, `extract`, and `crawl` capabilities across multiple providers with consistent tests, latency/cost metrics, and optional scoring diagnostics.
 
 ## Quick Start
 
@@ -56,7 +56,7 @@ JINA_API_KEY=your_key                # Optional: Jina works without key (lower l
 MXB_API_KEY=your_key                 # Preferred for Mixedbread
 # MIXEDBREAD_API_KEY=your_key        # Also supported
 
-# Optional quality scoring
+# Optional scoring diagnostics
 EMBEDDING_MODEL_BASE_URL=https://api.provider.com/v1
 EMBEDDING_MODEL_API_KEY=your_key
 EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
@@ -67,6 +67,7 @@ RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
 ```
 
 If `-quality` is enabled, all 4 required `EMBEDDING_*`/`RERANKER_*` base URL + key vars must be set.
+Search scoring is model-assisted (embedding + reranker). Extract/crawl scoring is heuristic.
 
 ### Test Configuration (`config.toml`)
 
@@ -150,7 +151,7 @@ Notes:
 | `-output` | Output base directory (overrides config) | config value |
 | `-providers` | `all` or comma list of providers | `all` |
 | `-format` | `all`, `html`, `md`, `json` | `all` |
-| `-quality` | Enable embedding + reranker quality scoring | `false` |
+| `-quality` | Enable scoring diagnostics (search model-assisted, extract/crawl heuristic) | `false` |
 | `-quick` | Reduced test run (up to 3 tests, `30s` timeout, crawl `max_depth=1`) | `false` |
 | `-debug` | Request/response debug logging | `false` |
 | `-debug-full` | Full body capture + timing breakdown | `false` |
@@ -217,14 +218,14 @@ internal/evaluator         Concurrent execution runner
 internal/metrics           Thread-safe result aggregation
 internal/report            HTML/Markdown/JSON reports
 internal/debug             Structured debug logs
-internal/quality           Optional AI quality scoring
+internal/quality           Optional scoring diagnostics
 ```
 
 ## Advanced Libraries
 
 These internal packages can be reused in custom tools:
 
-- `internal/quality`: embedding/reranker quality scoring
+- `internal/quality`: search relevance + heuristic scoring utilities
 - `internal/domains`: code/news/academic validators
 - `internal/evaluation`: cross-provider comparisons + golden baselines
 - `internal/robustness`: edge-case generation + stress testing
