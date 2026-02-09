@@ -193,7 +193,7 @@ func main() {
 	}
 
 	// Generate reports
-	generateReports(flags.format, runner.GetCollector(), cfg.General.OutputDir, *flags.qualityMode)
+	generateReports(flags.format, runner.GetCollector(), cfg.General.OutputDir)
 }
 
 func printBanner() {
@@ -308,7 +308,7 @@ func initializeProviders(providersFlag *string, noLocal bool, debugLogger *debug
 	return provs
 }
 
-func generateReports(formatFlag *string, collector *metrics.Collector, outputDir string, qualityEnabled bool) {
+func generateReports(formatFlag *string, collector *metrics.Collector, outputDir string) {
 	fmt.Println("\nGenerating reports...")
 	gen := report.NewGenerator(collector, outputDir)
 
@@ -339,26 +339,6 @@ func generateReports(formatFlag *string, collector *metrics.Collector, outputDir
 			} else {
 				fmt.Printf("✓ Generated all reports in: %s/\n", outputDir)
 			}
-		}
-	}
-
-	// Generate quality-specific reports if quality scoring was enabled
-	if qualityEnabled {
-		qualityGen := report.NewQualityReportGenerator(collector, outputDir)
-		if err := qualityGen.GenerateQualityHTML(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating quality HTML report: %v\n", err)
-		} else {
-			fmt.Printf("✓ Generated quality HTML report: %s/quality_report.html\n", outputDir)
-		}
-		if err := qualityGen.GenerateQualityMarkdown(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating quality Markdown report: %v\n", err)
-		} else {
-			fmt.Printf("✓ Generated quality Markdown report: %s/quality_report.md\n", outputDir)
-		}
-		if err := qualityGen.GenerateQualityJSON(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating quality JSON report: %v\n", err)
-		} else {
-			fmt.Printf("✓ Generated quality JSON report: %s/quality_report.json\n", outputDir)
 		}
 	}
 

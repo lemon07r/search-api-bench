@@ -361,8 +361,8 @@ func TestGenerateHTML_ChartScripts(t *testing.T) {
 	if !strings.Contains(html, "latencyChart") {
 		t.Error("HTML should contain latency chart canvas")
 	}
-	if !strings.Contains(html, "creditsChart") {
-		t.Error("HTML should contain credits chart canvas")
+	if !strings.Contains(html, "costChart") {
+		t.Error("HTML should contain cost chart canvas")
 	}
 	if !strings.Contains(html, "successChart") {
 		t.Error("HTML should contain success chart canvas")

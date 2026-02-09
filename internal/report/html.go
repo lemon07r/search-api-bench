@@ -136,24 +136,6 @@ func (g *Generator) GenerateHTML() error {
         </div>
 
         <div class="section">
-            <h2>Cost Efficiency - USD per Result</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper">
-                    <canvas id="costPerResultChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Cost Metrics Comparison (Legacy Credits)</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper">
-                    <canvas id="creditsChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
             <h2>Success Rate</h2>
             <div class="chart-container">
                 <div class="chart-wrapper">
@@ -332,22 +314,10 @@ func (g *Generator) generateChartScripts() string {
 	// Prepare data for charts
 	providerNames := make([]string, len(providers))
 	avgLatencies := make([]float64, len(providers))
-	totalCredits := make([]int, len(providers))
 	successRates := make([]float64, len(providers))
-	creditsPerResult := make([]float64, len(providers))
-	charsPerCredit := make([]float64, len(providers))
-	resultsPerCredit := make([]float64, len(providers))
 	avgQualityScores := make([]float64, len(providers))
 	// USD cost metrics
 	totalCostUSD := make([]float64, len(providers))
-	costPerResult := make([]float64, len(providers))
-	// Latency distribution data
-	minLatencies := make([]float64, len(providers))
-	p50Latencies := make([]float64, len(providers))
-	p95Latencies := make([]float64, len(providers))
-	maxLatencies := make([]float64, len(providers))
-	// Content metrics
-	avgContentLengths := make([]float64, len(providers))
 
 	baseColors := []string{"'#ff6b35'", "'#3498db'", "'#27ae60'", "'#9b59b6'", "'#e74c3c'", "'#f39c12'", "'#1abc9c'"}
 	colors := make([]string, len(providers))
@@ -361,25 +331,12 @@ func (g *Generator) generateChartScripts() string {
 		summary := g.collector.ComputeSummary(provider)
 		providerNames[i] = "'" + capitalize(provider) + "'"
 		avgLatencies[i] = float64(summary.AvgLatency.Milliseconds())
-		totalCredits[i] = summary.TotalCreditsUsed
 		if summary.TotalTests > 0 {
 			successRates[i] = float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
 		}
-		// Efficiency metrics
-		creditsPerResult[i] = summary.CreditsPerResult
-		charsPerCredit[i] = summary.CharsPerCredit
-		resultsPerCredit[i] = summary.ResultsPerCredit
 		avgQualityScores[i] = summary.AvgQualityScore
 		// USD cost metrics
 		totalCostUSD[i] = summary.TotalCostUSD
-		costPerResult[i] = summary.CostPerResult
-		// Latency distribution
-		minLatencies[i] = float64(summary.MinLatency.Milliseconds())
-		p50Latencies[i] = float64(summary.P50Latency.Milliseconds())
-		p95Latencies[i] = float64(summary.P95Latency.Milliseconds())
-		maxLatencies[i] = float64(summary.MaxLatency.Milliseconds())
-		// Content
-		avgContentLengths[i] = summary.AvgContentLength
 	}
 
 	qualityChartScript := ""
@@ -440,31 +397,6 @@ func (g *Generator) generateChartScripts() string {
                 },
                 scales: {
                     y: { beginAtZero: true, title: { display: true, text: 'Milliseconds' } }
-                }
-            }
-        });
-
-        // Credits Chart
-        new Chart(document.getElementById('creditsChart'), {
-            type: 'bar',
-            data: {
-                labels: [%s],
-                datasets: [{
-                    label: 'Total Credits Used',
-                    data: [%s],
-                    backgroundColor: [%s],
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    title: { display: true, text: 'Total API Credits Consumed' }
-                },
-                scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Credits' } }
                 }
             }
         });
@@ -531,69 +463,9 @@ func (g *Generator) generateChartScripts() string {
             }
         });
 
-        // USD Cost per Result Chart
-        new Chart(document.getElementById('costPerResultChart'), {
-            type: 'bar',
-            data: {
-                labels: [%s],
-                datasets: [{
-                    label: 'USD per Result',
-                    data: [%s],
-                    backgroundColor: [%s],
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    title: { display: true, text: 'Cost Efficiency: USD per Result (lower is better)' }
-                },
-                scales: {
-                    y: { 
-                        beginAtZero: true, 
-                        title: { display: true, text: 'USD ($)' },
-                        ticks: {
-                            callback: function(value) {
-                                return '$' + value.toFixed(4);
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Efficiency: Credits per Result (lower is better) - Legacy
-        new Chart(document.getElementById('creditsPerResultChart'), {
-            type: 'bar',
-            data: {
-                labels: [%s],
-                datasets: [{
-                    label: 'Credits per Result',
-                    data: [%s],
-                    backgroundColor: [%s],
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    title: { display: true, text: 'Legacy: Credits per Result (lower is better)' }
-                },
-                scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Credits' } }
-                }
-            }
-        });
 %s`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
-		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors),
 		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors),
 		joinStrings(providerNames), formatFloatSlice(totalCostUSD), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(costPerResult), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(creditsPerResult), joinStrings(colors),
 		advancedScripts)
 }
 
@@ -606,7 +478,6 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 	// Prepare normalized data for radar chart (0-100 scale)
 	radars := g.prepareRadarData(providers)
 	latencyDists := g.prepareLatencyDistributionData(providers)
-	testTypeData := g.prepareTestTypeData(providers)
 	scatterData := g.prepareScatterData(providers)
 	errorData := g.prepareErrorBreakdownData(providers)
 	heatmapData := g.prepareHeatmapData(providers)
@@ -632,9 +503,6 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 	radarDatasets = strings.TrimSuffix(radarDatasets, ",")
 
 	// Latency distribution data prepared (used in chart script via latencyDists)
-
-	// Build test type datasets
-	testTypeDatasets := g.buildTestTypeDatasets(providers, testTypeData, baseColors)
 
 	// Build scatter datasets (one per provider)
 	scatterDatasets := ""
@@ -769,30 +637,6 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             }
         });
 
-        // Test Type Performance Chart
-        new Chart(document.getElementById('testTypeChart'), {
-            type: 'bar',
-            data: {
-                labels: [%s],
-                datasets: [%s]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Performance by Operation Type (Success Rate %%)' },
-                    legend: { position: 'bottom' }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                        title: { display: true, text: 'Success Rate (%%)' }
-                    }
-                }
-            }
-        });
-
         // Cost vs Quality Scatter Plot
         new Chart(document.getElementById('costQualityScatter'), {
             type: 'bubble',
@@ -800,6 +644,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                layout: { padding: 30 },
                 plugins: {
                     title: { display: true, text: 'Cost vs Quality Trade-off (Bubble size = Results count)' },
                     legend: { display: true, position: 'bottom' },
@@ -819,7 +664,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     y: {
                         title: { display: true, text: 'Quality Score' },
                         min: 0,
-                        max: 100
+                        max: 110
                     }
                 }
             }
@@ -832,6 +677,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                layout: { padding: 30 },
                 plugins: {
                     title: { display: true, text: 'Speed vs Quality Trade-off (Bubble size = Results count)' },
                     legend: { display: true, position: 'bottom' },
@@ -851,7 +697,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     y: {
                         title: { display: true, text: 'Quality Score' },
                         min: 0,
-                        max: 100
+                        max: 110
                     }
                 }
             }
@@ -864,6 +710,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                layout: { padding: 30 },
                 plugins: {
                     title: { display: true, text: 'Cost vs Speed Trade-off (Bubble size = Success Rate)' },
                     legend: { display: true, position: 'bottom' },
@@ -920,8 +767,6 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 		formatFloatSlice(latencyDistsToP50P95(latencyDists)), "'rgba(46, 204, 113, 0.8)'",
 		formatFloatSlice(latencyDistsToP95Max(latencyDists)), "'rgba(231, 76, 60, 0.8)'",
 		g.formatLatencyRanges(latencyDists),
-		joinStrings([]string{"'Search'", "'Extract'", "'Crawl'"}),
-		testTypeDatasets,
 		scatterDatasets,
 		speedQualityDatasets,
 		costSpeedDatasets,
@@ -982,16 +827,6 @@ type latencyDist struct {
 	P95 float64
 	Max float64
 	Avg float64
-}
-
-// Test type data
-type testTypeMetrics struct {
-	SearchSuccessRate  float64
-	ExtractSuccessRate float64
-	CrawlSuccessRate   float64
-	SearchAvgLatency   float64
-	ExtractAvgLatency  float64
-	CrawlAvgLatency    float64
 }
 
 // Scatter plot data
@@ -1096,71 +931,6 @@ func (g *Generator) prepareLatencyDistributionData(providers []string) []latency
 	}
 
 	return data
-}
-
-// prepareTestTypeData creates test type breakdown data
-func (g *Generator) prepareTestTypeData(providers []string) []testTypeMetrics {
-	data := make([]testTypeMetrics, len(providers))
-
-	for i, p := range providers {
-		results := g.collector.GetResultsByProvider(p)
-
-		var searchSuccess, searchTotal int
-		var extractSuccess, extractTotal int
-		var crawlSuccess, crawlTotal int
-
-		var searchLatency time.Duration
-		var extractLatency time.Duration
-		var crawlLatency time.Duration
-
-		for _, r := range results {
-			switch r.TestType {
-			case "search":
-				searchTotal++
-				if r.Success {
-					searchSuccess++
-				}
-				searchLatency += r.Latency
-			case "extract":
-				extractTotal++
-				if r.Success {
-					extractSuccess++
-				}
-				extractLatency += r.Latency
-			case "crawl":
-				crawlTotal++
-				if r.Success {
-					crawlSuccess++
-				}
-				crawlLatency += r.Latency
-			}
-		}
-
-		data[i] = testTypeMetrics{
-			SearchSuccessRate:  calcSuccessRate(searchSuccess, searchTotal),
-			ExtractSuccessRate: calcSuccessRate(extractSuccess, extractTotal),
-			CrawlSuccessRate:   calcSuccessRate(crawlSuccess, crawlTotal),
-			SearchAvgLatency:   calcAvgLatency(searchLatency, searchTotal),
-			ExtractAvgLatency:  calcAvgLatency(extractLatency, extractTotal),
-			CrawlAvgLatency:    calcAvgLatency(crawlLatency, crawlTotal),
-		}
-	}
-
-	return data
-}
-
-func calcSuccessRate(success, total int) float64 {
-	if total == 0 {
-		return 0
-	}
-	return float64(success) / float64(total) * 100
-}
-
-func calcAvgLatency(total time.Duration, count int) float64 {
-	if count == 0 {
-		return 0
-	}
-	return float64(total.Milliseconds()) / float64(count)
 }
 
 // prepareScatterData creates data for scatter plots
@@ -1345,23 +1115,6 @@ func formatLatency(ms float64) string {
 	return fmt.Sprintf("%.0fms", ms)
 }
 
-func (g *Generator) buildTestTypeDatasets(providers []string, data []testTypeMetrics, colors []string) string {
-	// Group by test type - one dataset per provider, grouped bars by test type
-	datasets := ""
-
-	for i, p := range providers {
-		color := colors[i%len(colors)]
-		datasets += fmt.Sprintf(`{
-                    label: '%s',
-                    data: [%f, %f, %f],
-                    backgroundColor: %s,
-                    borderRadius: 4
-                },`, capitalize(p), data[i].SearchSuccessRate, data[i].ExtractSuccessRate, data[i].CrawlSuccessRate, color)
-	}
-
-	return strings.TrimSuffix(datasets, ",")
-}
-
 func (g *Generator) buildErrorDatasets(providers []string, data []errorBreakdown, _ []string) string {
 	errorTypes := []struct {
 		name  string
@@ -1500,26 +1253,19 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
         </div>
 
         <div class="section">
-            <h2>Test Type Performance Comparison</h2>
+            <h2>Cost vs Quality Analysis</h2>
             <div class="chart-container">
-                <div class="chart-wrapper">
-                    <canvas id="testTypeChart"></canvas>
+                <div class="chart-wrapper" style="height: 400px;">
+                    <canvas id="costQualityScatter"></canvas>
                 </div>
             </div>
         </div>
 
         <div class="section">
-            <h2>Cost vs Quality Analysis</h2>
-            <div class="chart-grid">
-                <div class="chart-container">
-                    <div class="chart-wrapper">
-                        <canvas id="costQualityScatter"></canvas>
-                    </div>
-                </div>
-                <div class="chart-container">
-                    <div class="chart-wrapper">
-                        <canvas id="speedQualityScatter"></canvas>
-                    </div>
+            <h2>Speed vs Quality Analysis</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper" style="height: 400px;">
+                    <canvas id="speedQualityScatter"></canvas>
                 </div>
             </div>
         </div>
@@ -1527,7 +1273,7 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
         <div class="section">
             <h2>Cost vs Speed Analysis</h2>
             <div class="chart-container">
-                <div class="chart-wrapper">
+                <div class="chart-wrapper" style="height: 400px;">
                     <canvas id="costSpeedScatter"></canvas>
                 </div>
             </div>
