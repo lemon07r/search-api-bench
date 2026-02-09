@@ -59,6 +59,9 @@ type TestLog struct {
 	Response  *ResponseLog           `json:"response,omitempty"`
 	Errors    []ErrorLog             `json:"errors"`
 	Metadata  map[string]interface{} `json:"metadata"`
+	
+	// internal metadata storage for non-serializable objects (not exported to JSON)
+	internalMeta map[string]interface{}
 }
 
 // RequestLog captures HTTP request details
@@ -173,10 +176,13 @@ func (l *Logger) NewTraceContext(testLog *TestLog) (*TimingBreakdown, func()) {
 		// TotalDuration should be set by the caller after request completes
 	}
 
-	// Store trace in test log metadata for later use
+	// Store trace in internal metadata (not serialized to JSON)
 	l.mu.Lock()
-	testLog.Metadata["_trace"] = trace
-	testLog.Metadata["_timing"] = timing
+	if testLog.internalMeta == nil {
+		testLog.internalMeta = make(map[string]interface{})
+	}
+	testLog.internalMeta["_trace"] = trace
+	testLog.internalMeta["_timing"] = timing
 	l.mu.Unlock()
 
 	return timing, finalize
@@ -191,7 +197,10 @@ func (l *Logger) GetTraceFromTest(testLog *TestLog) *httptrace.ClientTrace {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	if trace, ok := testLog.Metadata["_trace"].(*httptrace.ClientTrace); ok {
+	if testLog.internalMeta == nil {
+		return nil
+	}
+	if trace, ok := testLog.internalMeta["_trace"].(*httptrace.ClientTrace); ok {
 		return trace
 	}
 	return nil

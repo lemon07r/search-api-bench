@@ -15,10 +15,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/lamim/search-api-bench/internal/debug"
 	"github.com/lamim/search-api-bench/internal/providers"
 )
 
@@ -33,6 +36,7 @@ const (
 type Client struct {
 	apiKey     string
 	httpClient *http.Client
+	retryCfg   providers.RetryConfig
 }
 
 // NewClient creates a new Jina AI client
@@ -44,6 +48,7 @@ func NewClient() (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		retryCfg: providers.DefaultRetryConfig(),
 	}, nil
 }
 
@@ -55,7 +60,23 @@ func (c *Client) Name() string {
 // Search performs a web search using Jina AI Search API
 // Endpoint: GET https://s.jina.ai/?q={query}
 // Returns top 5 results with full content in LLM-friendly format
-func (c *Client) Search(ctx context.Context, query string, _ providers.SearchOptions) (*providers.SearchResult, error) {
+func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
+	var result *providers.SearchResult
+	var searchErr error
+
+	err := c.retryCfg.DoWithRetry(ctx, func() error {
+		result, searchErr = c.searchInternal(ctx, query, opts)
+		return searchErr
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// searchInternal performs the actual search request
+func (c *Client) searchInternal(ctx context.Context, query string, _ providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
 
 	// Build search URL with query parameter
@@ -64,7 +85,18 @@ func (c *Client) Search(ctx context.Context, query string, _ providers.SearchOpt
 	// Add JSON format for structured response
 	searchURL += "&format=json"
 
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	// Prepare headers
+	headers := make(map[string]string)
+	if c.apiKey != "" {
+		headers["Authorization"] = "Bearer "+c.apiKey
+	}
+
+	// Log the request
+	logRequest(ctx, "GET", searchURL, headers, "")
+
+	// Create request with trace context for timing
+	traceCtx, timing, finalize := newTraceContext(ctx)
+	req, err := http.NewRequestWithContext(traceCtx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -87,13 +119,57 @@ func (c *Client) Search(ctx context.Context, query string, _ providers.SearchOpt
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Finalize timing
+	finalize()
+	if timing != nil {
+		timing.TotalDuration = time.Since(start)
+	}
+
+	// Log the response
+	respHeaders := make(map[string]string)
+	respHeaders["Content-Type"] = resp.Header.Get("Content-Type")
+	logResponse(ctx, resp.StatusCode, respHeaders, string(respBody), len(respBody), time.Since(start))
+
+	// Check for non-OK status codes first
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		// Check if response is JSON error or plain text
+		contentType := resp.Header.Get("Content-Type")
+		if isJSONContent(contentType) {
+			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		}
+		// Plain text error (likely rate limit)
+		errMsg := strings.TrimSpace(string(respBody))
+		if resp.StatusCode == http.StatusTooManyRequests || isRateLimitError(errMsg) {
+			return nil, fmt.Errorf("rate limit exceeded: %s", errMsg)
+		}
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, errMsg)
+	}
+
+	// Check if response is actually JSON
+	contentType := resp.Header.Get("Content-Type")
+	if !isJSONContent(contentType) {
+		// Handle plain text response (rate limiting without proper status code)
+		textResp := strings.TrimSpace(string(respBody))
+		if isRateLimitError(textResp) {
+			return nil, fmt.Errorf("rate limit exceeded: %s", textResp)
+		}
+		// Try to parse as plain text search results
+		return c.parsePlainTextSearchResponse(query, textResp, start)
 	}
 
 	var result searchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		// Check if the body is a plain text error message
+		textBody := strings.TrimSpace(string(respBody))
+		if isRateLimitError(textBody) {
+			return nil, fmt.Errorf("rate limit exceeded: %s", textBody)
+		}
+		return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
+	}
+
+	// Check for API-level errors in JSON response
+	if result.Code != 0 && result.Code != 200 {
+		return nil, fmt.Errorf("API returned error code %d", result.Code)
 	}
 
 	latency := time.Since(start)
@@ -125,6 +201,22 @@ func (c *Client) Search(ctx context.Context, query string, _ providers.SearchOpt
 // Endpoint: GET https://r.jina.ai/http://{url}
 // Converts any URL to clean, LLM-friendly markdown
 func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
+	var result *providers.ExtractResult
+	var extractErr error
+
+	err := c.retryCfg.DoWithRetry(ctx, func() error {
+		result, extractErr = c.extractInternal(ctx, pageURL, opts)
+		return extractErr
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// extractInternal performs the actual extract request
+func (c *Client) extractInternal(ctx context.Context, pageURL string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
 	start := time.Now()
 
 	// Ensure URL has scheme
@@ -140,7 +232,18 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 		readerURL += "?format=json"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", readerURL, nil)
+	// Prepare headers
+	headers := make(map[string]string)
+	if c.apiKey != "" {
+		headers["Authorization"] = "Bearer "+c.apiKey
+	}
+
+	// Log the request
+	logRequest(ctx, "GET", readerURL, headers, "")
+
+	// Create request with trace context for timing
+	traceCtx, timing, finalize := newTraceContext(ctx)
+	req, err := http.NewRequestWithContext(traceCtx, "GET", readerURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -163,8 +266,25 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Finalize timing
+	finalize()
+	if timing != nil {
+		timing.TotalDuration = time.Since(start)
+	}
+
+	// Log the response
+	respHeaders := make(map[string]string)
+	respHeaders["Content-Type"] = resp.Header.Get("Content-Type")
+	logResponse(ctx, resp.StatusCode, respHeaders, string(respBody), len(respBody), time.Since(start))
+
+	// Check for non-OK status codes with proper error handling
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		contentType := resp.Header.Get("Content-Type")
+		errMsg := strings.TrimSpace(string(respBody))
+		if !isJSONContent(contentType) && isRateLimitError(errMsg) {
+			return nil, fmt.Errorf("rate limit exceeded: %s", errMsg)
+		}
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, errMsg)
 	}
 
 	latency := time.Since(start)
@@ -173,15 +293,34 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	var metadata map[string]interface{}
 
 	if opts.IncludeMetadata {
-		var result readerResponse
-		if err := json.Unmarshal(respBody, &result); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-		content = result.Content
-		title = result.Title
-		metadata = map[string]interface{}{
-			"url":       result.URL,
-			"timestamp": result.Timestamp,
+		// Check if response is actually JSON
+		contentType := resp.Header.Get("Content-Type")
+		if !isJSONContent(contentType) {
+			// Handle plain text response (likely rate limit message)
+			textResp := strings.TrimSpace(string(respBody))
+			if isRateLimitError(textResp) {
+				return nil, fmt.Errorf("rate limit exceeded: %s", textResp)
+			}
+			// Use plain text as content
+			content = textResp
+			title = extractTitleFromMarkdown(content)
+			metadata = map[string]interface{}{}
+		} else {
+			var result readerResponse
+			if err := json.Unmarshal(respBody, &result); err != nil {
+				// Check if body is plain text error
+				textBody := strings.TrimSpace(string(respBody))
+				if isRateLimitError(textBody) {
+					return nil, fmt.Errorf("rate limit exceeded: %s", textBody)
+				}
+				return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
+			}
+			content = result.Content
+			title = result.Title
+			metadata = map[string]interface{}{
+				"url":       result.URL,
+				"timestamp": result.Timestamp,
+			}
 		}
 	} else {
 		// Plain text response
@@ -317,6 +456,96 @@ func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ provider
 
 func hasScheme(s string) bool {
 	return len(s) > 7 && (s[:7] == "http://" || s[:8] == "https://")
+}
+
+// logRequest logs an HTTP request via the debug logger if available
+func logRequest(ctx context.Context, method, url string, headers map[string]string, body string) {
+	testLog := providers.TestLogFromContext(ctx)
+	logger := providers.DebugLoggerFromContext(ctx)
+	if logger == nil || testLog == nil {
+		return
+	}
+	logger.LogRequest(testLog, method, url, headers, body)
+}
+
+// logResponse logs an HTTP response via the debug logger if available
+func logResponse(ctx context.Context, statusCode int, headers map[string]string, body string, bodySize int, duration time.Duration) {
+	testLog := providers.TestLogFromContext(ctx)
+	logger := providers.DebugLoggerFromContext(ctx)
+	if logger == nil || testLog == nil {
+		return
+	}
+	logger.LogResponse(testLog, statusCode, headers, body, bodySize, duration)
+}
+
+// newTraceContext creates an httptrace context for timing breakdown if debug is enabled
+func newTraceContext(ctx context.Context) (context.Context, *debug.TimingBreakdown, func()) {
+	testLog := providers.TestLogFromContext(ctx)
+	logger := providers.DebugLoggerFromContext(ctx)
+	if logger == nil || testLog == nil {
+		return ctx, nil, func() {}
+	}
+	
+	timing, finalize := logger.NewTraceContext(testLog)
+	trace := logger.GetTraceFromTest(testLog)
+	if trace != nil {
+		return httptrace.WithClientTrace(ctx, trace), timing, finalize
+	}
+	return ctx, timing, finalize
+}
+
+// isJSONContent checks if content type indicates JSON
+func isJSONContent(contentType string) bool {
+	return strings.Contains(contentType, "application/json") || strings.Contains(contentType, "text/json")
+}
+
+// isRateLimitError checks if error message indicates rate limiting
+func isRateLimitError(msg string) bool {
+	msgLower := strings.ToLower(msg)
+	return strings.Contains(msgLower, "too many requests") ||
+		strings.Contains(msgLower, "rate limit") ||
+		strings.Contains(msgLower, "ratelimit") ||
+		strings.Contains(msgLower, "quota exceeded") ||
+		strings.Contains(msgLower, "limit exceeded")
+}
+
+// truncateString limits string length with ellipsis
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// parsePlainTextSearchResponse attempts to parse plain text as search results
+func (c *Client) parsePlainTextSearchResponse(query, text string, startTime time.Time) (*providers.SearchResult, error) {
+	latency := time.Since(startTime)
+
+	// If text is empty or looks like an error, return it as error
+	if text == "" || strings.Contains(strings.ToLower(text), "error") {
+		return nil, fmt.Errorf("API returned plain text error: %s", text)
+	}
+
+	// Create a single search result from the text
+	// This is a fallback when JSON format is not available
+	items := []providers.SearchItem{
+		{
+			Title:   "Search Result",
+			URL:     "",
+			Content: text,
+		},
+	}
+
+	return &providers.SearchResult{
+		Query:        query,
+		Results:      items,
+		TotalResults: len(items),
+		Latency:      latency,
+		CreditsUsed:  10000,
+	}, nil
 }
 
 func extractTitleFromMarkdown(content string) string {
