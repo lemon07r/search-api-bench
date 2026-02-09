@@ -252,6 +252,9 @@ func (g *Generator) generateTableRows() string {
 		if cost == 0 {
 			return "-"
 		}
+		if cost > 0 && cost < 0.0001 {
+			return "<$0.0001"
+		}
 		if cost < 0.01 {
 			return fmt.Sprintf("$%.4f", cost)
 		}

@@ -471,3 +471,47 @@ func TestComputeSummary_AllSkipped(t *testing.T) {
 		t.Fatalf("expected avg latency 0, got %v", summary.AvgLatency)
 	}
 }
+
+func TestComputeSummary_QualityCoverageAndReliabilityAdjusted(t *testing.T) {
+	c := NewCollector()
+	c.AddResult(Result{
+		Provider:     "test",
+		Success:      true,
+		QualityScore: 80,
+	})
+	c.AddResult(Result{
+		Provider:     "test",
+		Success:      false,
+		QualityScore: 40,
+	})
+	c.AddResult(Result{
+		Provider: "test",
+		Success:  true,
+		Skipped:  true,
+	})
+	c.AddResult(Result{
+		Provider: "test",
+		Success:  true,
+	})
+
+	summary := c.ComputeSummary("test")
+	if summary.ExecutedTests != 3 {
+		t.Fatalf("expected 3 executed tests, got %d", summary.ExecutedTests)
+	}
+	if summary.ScoredTests != 2 {
+		t.Fatalf("expected 2 scored tests, got %d", summary.ScoredTests)
+	}
+	if summary.QualityCoveragePct < 66.6 || summary.QualityCoveragePct > 66.7 {
+		t.Fatalf("expected quality coverage about 66.67%%, got %.4f", summary.QualityCoveragePct)
+	}
+	if summary.AvgQualityScore != 60 {
+		t.Fatalf("expected average quality 60, got %.2f", summary.AvgQualityScore)
+	}
+	if summary.SuccessRate < 66.6 || summary.SuccessRate > 66.7 {
+		t.Fatalf("expected success rate about 66.67%%, got %.4f", summary.SuccessRate)
+	}
+	// 60 * 0.6667 * 0.6667 ~= 26.67
+	if summary.ReliabilityAdjustedQuality < 26.6 || summary.ReliabilityAdjustedQuality > 26.8 {
+		t.Fatalf("expected reliability-adjusted quality about 26.67, got %.4f", summary.ReliabilityAdjustedQuality)
+	}
+}

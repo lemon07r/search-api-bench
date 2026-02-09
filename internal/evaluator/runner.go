@@ -240,10 +240,16 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 			result.QualityScore = qualityScore.OverallScore
 			result.SemanticScore = qualityScore.SemanticRelevance
 			result.RerankerScore = qualityScore.RerankerScore
+			result.RawQualityMetrics = map[string]interface{}{
+				"semantic_available": qualityScore.SemanticAvailable,
+				"reranker_available": qualityScore.RerankerAvailable,
+			}
 			if r.debugLogger != nil && r.debugLogger.IsEnabled() {
 				r.debugLogger.SetMetadata(testLog, "quality_score", qualityScore.OverallScore)
 				r.debugLogger.SetMetadata(testLog, "semantic_score", qualityScore.SemanticRelevance)
 				r.debugLogger.SetMetadata(testLog, "reranker_score", qualityScore.RerankerScore)
+				r.debugLogger.SetMetadata(testLog, "semantic_available", qualityScore.SemanticAvailable)
+				r.debugLogger.SetMetadata(testLog, "reranker_available", qualityScore.RerankerAvailable)
 			}
 		}
 	}
