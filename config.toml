@@ -92,7 +92,7 @@ expected_content = ["Go", "examples", "programming", "tutorial"]
 [[tests]]
 name = "Crawl - Single Page"
 type = "crawl"
-url = "https://example.com"
+url = "https://docs.python.org/3/tutorial/"
 max_pages = 1
 max_depth = 0
 

@@ -73,6 +73,11 @@ func (c *Client) Name() string {
 // Endpoint: GET https://s.jina.ai/?q={query}
 // Returns top 5 results with full content in LLM-friendly format
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
+	// Limit max results to prevent timeouts - Jina Search API can be slow with many results
+	if opts.MaxResults > 3 {
+		opts.MaxResults = 3
+	}
+
 	var result *providers.SearchResult
 	var searchErr error
 
