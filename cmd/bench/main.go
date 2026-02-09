@@ -371,8 +371,8 @@ func initializeQualityScorer() (*quality.Scorer, error) {
 	if os.Getenv("EMBEDDING_MODEL_BASE_URL") == "" {
 		return nil, fmt.Errorf("EMBEDDING_MODEL_BASE_URL not set")
 	}
-	if os.Getenv("EMBEDDING_EMBEDDING_MODEL_API_KEY") == "" {
-		return nil, fmt.Errorf("EMBEDDING_EMBEDDING_MODEL_API_KEY not set")
+	if os.Getenv("EMBEDDING_MODEL_API_KEY") == "" {
+		return nil, fmt.Errorf("EMBEDDING_MODEL_API_KEY not set")
 	}
 	if os.Getenv("RERANKER_MODEL_BASE_URL") == "" {
 		return nil, fmt.Errorf("RERANKER_MODEL_BASE_URL not set")
