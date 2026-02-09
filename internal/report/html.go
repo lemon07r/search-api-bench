@@ -158,6 +158,10 @@ func (g *Generator) generateTableRows() string {
 	var rows string
 	tests := g.collector.GetAllTests()
 
+	formatLatency := func(d time.Duration) string {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+
 	for _, testName := range tests {
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
@@ -182,11 +186,11 @@ func (g *Generator) generateTableRows() string {
                         <td>%s</td>
                         <td><span class="provider-badge %s">%s</span></td>
                         <td>%s</td>
-                        <td>%v</td>
+                        <td>%s</td>
                         <td>%d</td>
                         <td>%s</td>
                     </tr>
-`, testName, providerClass, capitalize(r.Provider), status, r.Latency.Round(time.Millisecond), r.CreditsUsed, details)
+`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), r.CreditsUsed, details)
 		}
 	}
 

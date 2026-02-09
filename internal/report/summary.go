@@ -12,6 +12,11 @@ import (
 	"github.com/lamim/search-api-bench/internal/metrics"
 )
 
+// FormatLatency formats a duration as milliseconds for consistent comparison.
+func FormatLatency(d time.Duration) string {
+	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
 // Generator creates reports from benchmark results
 type Generator struct {
 	collector *metrics.Collector
@@ -57,11 +62,11 @@ func (g *Generator) GenerateMarkdown() error {
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
 		successRate := float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
-		sb.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %v | %d | %.0f chars |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %s | %d | %.0f chars |\n",
 			provider,
 			summary.TotalTests,
 			successRate,
-			summary.AvgLatency.Round(time.Millisecond),
+			FormatLatency(summary.AvgLatency),
 			summary.TotalCreditsUsed,
 			summary.AvgContentLength,
 		))
@@ -95,10 +100,10 @@ func (g *Generator) GenerateMarkdown() error {
 				details = fmt.Sprintf("%d pages, %d chars", r.ResultsCount, r.ContentLength)
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | %s | %v | %d | %s |\n",
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s |\n",
 				r.Provider,
 				status,
-				r.Latency.Round(time.Millisecond),
+				FormatLatency(r.Latency),
 				r.CreditsUsed,
 				details,
 			))
@@ -123,8 +128,8 @@ func (g *Generator) GenerateMarkdown() error {
 			}
 			sb.WriteString(fmt.Sprintf("- **%s** is %.1f%% faster on average\n", faster, speedDiff))
 		}
-		sb.WriteString(fmt.Sprintf("- %s avg latency: %v\n", providers[0], summary1.AvgLatency.Round(time.Millisecond)))
-		sb.WriteString(fmt.Sprintf("- %s avg latency: %v\n\n", providers[1], summary2.AvgLatency.Round(time.Millisecond)))
+		sb.WriteString(fmt.Sprintf("- %s avg latency: %s\n", providers[0], FormatLatency(summary1.AvgLatency)))
+		sb.WriteString(fmt.Sprintf("- %s avg latency: %s\n\n", providers[1], FormatLatency(summary2.AvgLatency)))
 
 		sb.WriteString("### Cost Comparison\n\n")
 		if summary1.TotalCreditsUsed > 0 && summary2.TotalCreditsUsed > 0 {
