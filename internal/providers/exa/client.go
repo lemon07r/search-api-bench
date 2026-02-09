@@ -57,6 +57,16 @@ func (c *Client) Name() string {
 	return "exa"
 }
 
+// SupportsOperation returns whether Exa supports the given operation type
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "search", "extract", "crawl":
+		return true
+	default:
+		return false
+	}
+}
+
 // Search performs a web search using Exa AI API
 // Endpoint: POST /search
 // Native features leveraged:
@@ -92,7 +102,13 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/search", bytes.NewReader(body))
+	reqURL := c.baseURL + "/search"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -102,15 +118,18 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, err
 	}
 
 	var result searchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal search response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	// Convert Exa results to provider format
 	items := make([]providers.SearchItem, 0, len(result.Results))
@@ -166,7 +185,13 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/contents", bytes.NewReader(body))
+	reqURL := c.baseURL + "/contents"
+	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
+	}, string(body))
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -176,15 +201,18 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 
 	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
+		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, err
 	}
 
 	var result contentsResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		providers.LogError(ctx, err.Error(), "parse", "failed to unmarshal extract response")
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	latency := time.Since(start)
+	providers.LogResponse(ctx, 200, nil, string(respBody), len(respBody), latency)
 
 	if len(result.Results) == 0 {
 		return nil, fmt.Errorf("no extraction results returned")

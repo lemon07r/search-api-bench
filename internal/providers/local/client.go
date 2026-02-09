@@ -40,6 +40,19 @@ func (c *Client) Name() string {
 	return "local"
 }
 
+// SupportsOperation returns whether the local provider supports the given operation type
+// Local provider only supports extract and crawl, not search (no web index)
+func (c *Client) SupportsOperation(opType string) bool {
+	switch opType {
+	case "extract", "crawl":
+		return true
+	case "search":
+		return false // Local provider cannot index the web
+	default:
+		return false
+	}
+}
+
 // Search is not supported for a local crawler as it cannot index the entire web.
 // This operation requires a search index which only APIs like Tavily/Firecrawl provide.
 func (c *Client) Search(_ context.Context, _ string, _ providers.SearchOptions) (*providers.SearchResult, error) {

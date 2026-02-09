@@ -93,8 +93,12 @@ type CrawledPage struct {
 }
 
 // Provider defines the interface for search/crawl providers
+// Provider defines the interface for search/crawl providers
 type Provider interface {
 	Name() string
+	// SupportsOperation returns whether the provider supports the given operation type
+	// Valid operation types: "search", "extract", "crawl"
+	SupportsOperation(opType string) bool
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
 	Extract(ctx context.Context, url string, opts ExtractOptions) (*ExtractResult, error)
 	Crawl(ctx context.Context, url string, opts CrawlOptions) (*CrawlResult, error)
@@ -126,7 +130,7 @@ type CrawlOptions struct {
 func DefaultSearchOptions() SearchOptions {
 	return SearchOptions{
 		MaxResults:    5,
-		SearchDepth:   "basic",
+		SearchDepth:   "advanced", // Use advanced to get full content for quality scoring
 		IncludeAnswer: true,
 	}
 }

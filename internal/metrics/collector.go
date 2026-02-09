@@ -13,6 +13,8 @@ type Result struct {
 	Provider      string        `json:"provider"`
 	TestType      string        `json:"test_type"`
 	Success       bool          `json:"success"`
+	Skipped       bool          `json:"skipped,omitempty"`
+	SkipReason    string        `json:"skip_reason,omitempty"`
 	Error         string        `json:"error,omitempty"`
 	ErrorCategory string        `json:"error_category,omitempty"`
 	Latency       time.Duration `json:"latency"`
@@ -38,6 +40,7 @@ type Summary struct {
 	TotalTests         int           `json:"total_tests"`
 	SuccessfulTests    int           `json:"successful_tests"`
 	FailedTests        int           `json:"failed_tests"`
+	SkippedTests       int           `json:"skipped_tests"`
 	SuccessRate        float64       `json:"success_rate"`
 	TotalLatency       time.Duration `json:"total_latency"`
 	AvgLatency         time.Duration `json:"avg_latency"`
@@ -160,6 +163,12 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	latencies := make([]time.Duration, 0, len(results))
 
 	for _, r := range results {
+		// Handle skipped tests separately
+		if r.Skipped {
+			summary.SkippedTests++
+			continue // Don't count skipped tests in success/failure metrics
+		}
+
 		if r.Success {
 			summary.SuccessfulTests++
 		} else {
