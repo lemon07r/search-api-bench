@@ -228,12 +228,14 @@ func (g *Generator) generateQualitySection() string {
 `
 }
 
-// generateQualityTableHeader returns the quality column header if quality scores exist
+// generateQualityTableHeader returns the quality column headers if quality scores exist
 func (g *Generator) generateQualityTableHeader() string {
 	if !g.hasQualityScores() {
 		return ""
 	}
-	return `                        <th>Quality</th>`
+	return `                        <th>Quality</th>
+                        <th>Semantic</th>
+                        <th>Reranker</th>`
 }
 
 func (g *Generator) generateTableRows() string {
@@ -281,6 +283,14 @@ func (g *Generator) generateTableRows() string {
 				if r.QualityScore > 0 {
 					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
 				}
+				semanticStr := "-"
+				if r.SemanticScore > 0 {
+					semanticStr = fmt.Sprintf("%.1f", r.SemanticScore)
+				}
+				rerankerStr := "-"
+				if r.RerankerScore > 0 {
+					rerankerStr = fmt.Sprintf("%.1f", r.RerankerScore)
+				}
 				rows += fmt.Sprintf(`                    <tr>
                         <td>%s</td>
                         <td><span class="provider-badge %s">%s</span></td>
@@ -289,8 +299,10 @@ func (g *Generator) generateTableRows() string {
                         <td>%s</td>
                         <td>%s</td>
                         <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
                     </tr>
-`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), costStr, details, qualityStr)
+`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), costStr, details, qualityStr, semanticStr, rerankerStr)
 			} else {
 				rows += fmt.Sprintf(`                    <tr>
                         <td>%s</td>
