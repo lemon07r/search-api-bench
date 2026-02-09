@@ -92,6 +92,9 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 	var testLog *debug.TestLog
 	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
 		testLog = r.debugLogger.StartTest(prov.Name(), test.Name, test.Type)
+		// Pass debug logger and test log via context
+		timeoutCtx = providers.WithDebugLogger(timeoutCtx, r.debugLogger)
+		timeoutCtx = providers.WithTestLog(timeoutCtx, testLog)
 	}
 
 	// Report test start to progress manager
@@ -300,20 +303,81 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 
 // categorizeError categorizes an error for better reporting
 func categorizeError(err error) string {
-	errStr := err.Error()
+	if err == nil {
+		return ""
+	}
+
+	errStr := strings.ToLower(err.Error())
+
 	switch {
-	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "context deadline exceeded"):
+	// Timeout errors
+	case strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "context deadline exceeded") ||
+		strings.Contains(errStr, "i/o timeout"):
 		return "timeout"
-	case strings.Contains(errStr, "401") || strings.Contains(errStr, "403"):
-		return "auth"
-	case strings.Contains(errStr, "429"):
+
+	// Rate limit errors - check before auth since "too many requests" can appear with 429
+	case strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "ratelimit") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "429") ||
+		strings.Contains(errStr, "quota exceeded") ||
+		strings.Contains(errStr, "limit exceeded"):
 		return "rate_limit"
-	case strings.Contains(errStr, "5") && len(errStr) > 3 && errStr[len(errStr)-3] == '5':
+
+	// Auth errors
+	case strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "403") ||
+		strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "authentication") ||
+		strings.Contains(errStr, "api key"):
+		return "auth"
+
+	// Server errors (5xx)
+	case strings.Contains(errStr, "500") ||
+		strings.Contains(errStr, "502") ||
+		strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "504") ||
+		strings.Contains(errStr, "internal server error") ||
+		strings.Contains(errStr, "bad gateway") ||
+		strings.Contains(errStr, "service unavailable"):
 		return "server_error"
-	case strings.Contains(errStr, "404"):
-		return "not_found"
-	case strings.Contains(errStr, "scrape") || strings.Contains(errStr, "crawl"):
+
+	// Client errors (4xx)
+	case strings.Contains(errStr, "400") ||
+		strings.Contains(errStr, "404") ||
+		strings.Contains(errStr, "405") ||
+		strings.Contains(errStr, "422") ||
+		strings.Contains(errStr, "bad request") ||
+		strings.Contains(errStr, "not found") ||
+		strings.Contains(errStr, "validation"):
+		return "client_error"
+
+	// Network errors
+	case strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "network") ||
+		strings.Contains(errStr, "dns") ||
+		strings.Contains(errStr, "temporary failure"):
+		return "network"
+
+	// Parse errors (JSON unmarshaling failures, etc.)
+	case strings.Contains(errStr, "unmarshal") ||
+		strings.Contains(errStr, "parse") ||
+		strings.Contains(errStr, "invalid character") ||
+		strings.Contains(errStr, "invalid syntax"):
+		return "parse"
+
+	// Crawl/scrape specific errors
+	case strings.Contains(errStr, "crawl") ||
+		strings.Contains(errStr, "scrape") ||
+		strings.Contains(errStr, "not supported"):
 		return "crawl_failed"
+
+	// Context canceled
+	case strings.Contains(errStr, "context canceled"):
+		return "canceled"
+
 	default:
 		return "other"
 	}

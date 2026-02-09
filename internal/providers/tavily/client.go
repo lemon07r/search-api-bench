@@ -141,10 +141,11 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 func (c *Client) Extract(ctx context.Context, url string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
 	start := time.Now()
 
-	// Map SearchDepth to extract_depth: basic -> basic, advanced -> comprehensive
+	// Map SearchDepth to extract_depth: basic -> basic, advanced -> advanced
+	// Tavily API only accepts 'basic' or 'advanced' (not 'comprehensive')
 	extractDepth := "basic"
-	if opts.Format == "comprehensive" || opts.IncludeMetadata {
-		extractDepth = "comprehensive"
+	if opts.Format == "advanced" || opts.IncludeMetadata {
+		extractDepth = "advanced"
 	}
 
 	payload := map[string]interface{}{

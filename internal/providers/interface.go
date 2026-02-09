@@ -5,7 +5,45 @@ package providers
 import (
 	"context"
 	"time"
+
+	"github.com/lamim/search-api-bench/internal/debug"
 )
+
+// contextKey is a private type for context keys to avoid collisions
+type contextKey int
+
+const (
+	// debugLoggerKey is the context key for the debug logger
+	debugLoggerKey contextKey = iota
+	// testLogKey is the context key for the current test log
+	testLogKey
+)
+
+// WithDebugLogger returns a context with the debug logger attached
+func WithDebugLogger(ctx context.Context, logger *debug.Logger) context.Context {
+	return context.WithValue(ctx, debugLoggerKey, logger)
+}
+
+// DebugLoggerFromContext retrieves the debug logger from context
+func DebugLoggerFromContext(ctx context.Context) *debug.Logger {
+	if logger, ok := ctx.Value(debugLoggerKey).(*debug.Logger); ok {
+		return logger
+	}
+	return nil
+}
+
+// WithTestLog returns a context with the test log attached
+func WithTestLog(ctx context.Context, testLog *debug.TestLog) context.Context {
+	return context.WithValue(ctx, testLogKey, testLog)
+}
+
+// TestLogFromContext retrieves the test log from context
+func TestLogFromContext(ctx context.Context) *debug.TestLog {
+	if testLog, ok := ctx.Value(testLogKey).(*debug.TestLog); ok {
+		return testLog
+	}
+	return nil
+}
 
 // SearchResult represents the result of a search operation
 type SearchResult struct {
