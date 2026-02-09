@@ -19,10 +19,10 @@ import (
 
 func main() {
 	var (
-		configPath   = flag.String("config", "config.toml", "Path to configuration file")
-		outputDir    = flag.String("output", "", "Output directory for reports (overrides config)")
+		configPath    = flag.String("config", "config.toml", "Path to configuration file")
+		outputDir     = flag.String("output", "", "Output directory for reports (overrides config)")
 		providersFlag = flag.String("providers", "all", "Providers to test: all, firecrawl, tavily")
-		format       = flag.String("format", "all", "Report format: all, html, md, json")
+		format        = flag.String("format", "all", "Report format: all, html, md, json")
 	)
 	flag.Parse()
 
@@ -188,5 +188,3 @@ func parseFormats(s string) []string {
 	}
 	return strings.Split(s, ",")
 }
-
-

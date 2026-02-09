@@ -9,12 +9,12 @@ import (
 
 // SearchResult represents the result of a search operation
 type SearchResult struct {
-	Query           string
-	Results         []SearchItem
-	TotalResults    int
-	Latency         time.Duration
-	CreditsUsed     int
-	RawResponse     []byte
+	Query        string
+	Results      []SearchItem
+	TotalResults int
+	Latency      time.Duration
+	CreditsUsed  int
+	RawResponse  []byte
 }
 
 // SearchItem represents a single search result
@@ -64,31 +64,31 @@ type Provider interface {
 
 // SearchOptions contains options for search operations
 type SearchOptions struct {
-	MaxResults   int
-	SearchDepth  string // basic, advanced
+	MaxResults    int
+	SearchDepth   string // basic, advanced
 	IncludeImages bool
 	IncludeAnswer bool
-	TimeRange    string // day, week, month, year
+	TimeRange     string // day, week, month, year
 }
 
 // ExtractOptions contains options for extract operations
 type ExtractOptions struct {
-	Format      string // markdown, html, text
+	Format          string // markdown, html, text
 	IncludeMetadata bool
 }
 
 // CrawlOptions contains options for crawl operations
 type CrawlOptions struct {
-	MaxPages    int
-	MaxDepth    int
+	MaxPages     int
+	MaxDepth     int
 	ExcludePaths []string
 }
 
 // DefaultSearchOptions returns default search options
 func DefaultSearchOptions() SearchOptions {
 	return SearchOptions{
-		MaxResults:   5,
-		SearchDepth:  "basic",
+		MaxResults:    5,
+		SearchDepth:   "basic",
 		IncludeAnswer: true,
 	}
 }

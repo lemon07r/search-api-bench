@@ -121,8 +121,13 @@ checksums:
 	@cd $(BUILD_DIR)/release && sha256sum * > checksums.txt
 	@cat $(BUILD_DIR)/release/checksums.txt
 
-# Development helpers
-dev: fmt lint test build
+# Run go vet
+vet:
+	$(GOCMD) vet ./...
+
+# CI pipeline - runs all pre-compile checks in order
+ci: fmt vet lint test build
+	@echo "✓ All checks passed and build complete!"
 
 # Help
 help:
@@ -138,4 +143,5 @@ help:
 	@echo "  make install        - Install binary to GOPATH/bin"
 	@echo "  make release        - Create release archives for all platforms"
 	@echo "  make deps           - Download and tidy dependencies"
-	@echo "  make dev            - Run fmt, lint, test, and build"
+	@echo "  make vet            - Run go vet for static analysis"
+	@echo "  make ci             - Run all pre-compile checks (fmt, vet, lint, test, build)"

@@ -70,7 +70,7 @@ func (c *Collector) GetResults() []Result {
 func (c *Collector) GetResultsByProvider(provider string) []Result {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	var filtered []Result
 	for _, r := range c.results {
 		if r.Provider == provider {
@@ -84,7 +84,7 @@ func (c *Collector) GetResultsByProvider(provider string) []Result {
 func (c *Collector) GetResultsByTest(testName string) []Result {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	var filtered []Result
 	for _, r := range c.results {
 		if r.TestName == testName {
@@ -97,16 +97,16 @@ func (c *Collector) GetResultsByTest(testName string) []Result {
 // ComputeSummary computes summary metrics for a provider
 func (c *Collector) ComputeSummary(provider string) *Summary {
 	results := c.GetResultsByProvider(provider)
-	
+
 	if len(results) == 0 {
 		return &Summary{Provider: provider}
 	}
 
 	summary := &Summary{
-		Provider:       provider,
-		TotalTests:     len(results),
-		MinLatency:     results[0].Latency,
-		MaxLatency:     results[0].Latency,
+		Provider:   provider,
+		TotalTests: len(results),
+		MinLatency: results[0].Latency,
+		MaxLatency: results[0].Latency,
 	}
 
 	var totalLatency time.Duration
@@ -140,7 +140,7 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	summary.AvgCreditsPerReq = float64(totalCredits) / float64(len(results))
 	summary.TotalContentLength = totalContentLength
 	summary.AvgContentLength = float64(totalContentLength) / float64(len(results))
-	
+
 	if summary.TotalTests > 0 {
 		summary.ResultsPerQuery = float64(totalResultsCount) / float64(summary.TotalTests)
 	}

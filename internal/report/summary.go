@@ -14,8 +14,8 @@ import (
 
 // Generator creates reports from benchmark results
 type Generator struct {
-	collector  *metrics.Collector
-	outputDir  string
+	collector *metrics.Collector
+	outputDir string
 }
 
 // NewGenerator creates a new report generator
