@@ -116,7 +116,7 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 			allContent += item.Title + " " + item.Content + " "
 		}
 		allContent = strings.ToLower(allContent)
-		
+
 		matchedTopics := 0
 		for _, topic := range test.ExpectedTopics {
 			if strings.Contains(allContent, strings.ToLower(topic)) {

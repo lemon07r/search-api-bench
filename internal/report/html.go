@@ -294,8 +294,8 @@ func (g *Generator) generateChartScripts() string {
             }
         });
 `, joinStrings(providerNames), avgLatencies, joinStrings(colors[:len(providers)]),
-	   joinStrings(providerNames), totalCredits, joinStrings(colors[:len(providers)]),
-	   joinStrings(providerNames), successRates, joinStrings(colors[:len(providers)]))
+		joinStrings(providerNames), totalCredits, joinStrings(colors[:len(providers)]),
+		joinStrings(providerNames), successRates, joinStrings(colors[:len(providers)]))
 }
 
 func joinStrings(strs []string) string {

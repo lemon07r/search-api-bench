@@ -57,9 +57,9 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	}
 
 	payload := map[string]interface{}{
-		"query":        query,
-		"search_depth": searchDepth,
-		"max_results":  opts.MaxResults,
+		"query":          query,
+		"search_depth":   searchDepth,
+		"max_results":    opts.MaxResults,
 		"include_answer": opts.IncludeAnswer,
 		"include_images": opts.IncludeImages,
 	}
@@ -285,10 +285,10 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 
 // Response types
 type searchResponse struct {
-	Answer   string `json:"answer"`
-	Query    string `json:"query"`
+	Answer       string  `json:"answer"`
+	Query        string  `json:"query"`
 	ResponseTime float64 `json:"response_time"`
-	Results  []struct {
+	Results      []struct {
 		Title         string  `json:"title"`
 		URL           string  `json:"url"`
 		Content       string  `json:"content"`
@@ -311,6 +311,6 @@ type extractResponse struct {
 }
 
 type mapResponse struct {
-	Links []string `json:"links"`
+	Links   []string `json:"links"`
 	Results []string `json:"results"`
 }

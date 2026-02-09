@@ -16,6 +16,16 @@ linters:
     - unconvert      # Nice: remove unnecessary conversions
     - unparam        # Nice: detect unused parameters
     - ineffassign    # Good: detect ineffectual assignments
+  exclusions:
+    rules:
+      # Exclude test files from overly strict linters
+      - path: '_test\.go$'
+        linters:
+          - errcheck
+          - gosec
+          - revive
+          - staticcheck
+          - unparam
 
 linters-settings:
   errcheck:

@@ -109,12 +109,12 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	}
 
 	return &providers.SearchResult{
-		Query:       query,
-		Results:     items,
+		Query:        query,
+		Results:      items,
 		TotalResults: len(items),
-		Latency:     latency,
-		CreditsUsed: 1, // Firecrawl search uses 1 credit per request
-		RawResponse: respBody,
+		Latency:      latency,
+		CreditsUsed:  1, // Firecrawl search uses 1 credit per request
+		RawResponse:  respBody,
 	}, nil
 }
 
@@ -123,7 +123,7 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	start := time.Now()
 
 	payload := map[string]interface{}{
-		"url": url,
+		"url":     url,
 		"formats": []string{"markdown"},
 	}
 
@@ -186,7 +186,7 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	start := time.Now()
 
 	payload := map[string]interface{}{
-		"url": url,
+		"url":   url,
 		"limit": opts.MaxPages,
 		"scrapeOptions": map[string]interface{}{
 			"formats": []string{"markdown"},
@@ -256,7 +256,7 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 
 func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Time) (*providers.CrawlResult, error) {
 	checkURL := c.baseURL + "/crawl/" + crawlID
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -291,7 +291,7 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 
 		if status.Status == "completed" {
 			latency := time.Since(start)
-			
+
 			pages := make([]providers.CrawledPage, 0, len(status.Data))
 			for _, d := range status.Data {
 				pages = append(pages, providers.CrawledPage{
@@ -323,8 +323,8 @@ type searchResponse struct {
 	Data    []struct {
 		Markdown string `json:"markdown"`
 		Metadata struct {
-			Title      string `json:"title"`
-			SourceURL  string `json:"sourceURL"`
+			Title     string `json:"title"`
+			SourceURL string `json:"sourceURL"`
 		} `json:"metadata"`
 	} `json:"data"`
 }
@@ -334,9 +334,9 @@ type scrapeResponse struct {
 	Data    struct {
 		Markdown string `json:"markdown"`
 		Metadata struct {
-			Title      string            `json:"title"`
-			SourceURL  string            `json:"sourceURL"`
-			Raw        map[string]interface{} `json:"-"`
+			Title     string                 `json:"title"`
+			SourceURL string                 `json:"sourceURL"`
+			Raw       map[string]interface{} `json:"-"`
 		} `json:"metadata"`
 	} `json:"data"`
 }
@@ -348,8 +348,8 @@ type crawlResponse struct {
 	Data    []struct {
 		Markdown string `json:"markdown"`
 		Metadata struct {
-			Title      string `json:"title"`
-			SourceURL  string `json:"sourceURL"`
+			Title     string `json:"title"`
+			SourceURL string `json:"sourceURL"`
 		} `json:"metadata"`
 	} `json:"data"`
 }
@@ -361,8 +361,8 @@ type crawlStatusResponse struct {
 	Data   []struct {
 		Markdown string `json:"markdown"`
 		Metadata struct {
-			Title      string `json:"title"`
-			SourceURL  string `json:"sourceURL"`
+			Title     string `json:"title"`
+			SourceURL string `json:"sourceURL"`
 		} `json:"metadata"`
 	} `json:"data"`
 }

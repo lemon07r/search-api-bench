@@ -37,3 +37,6 @@ Thumbs.db
 # Release archives
 *.tar.gz
 *.zip
+
+# Agent-specific documentation
+AGENTS.md
