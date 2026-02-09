@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/config"
+	"github.com/lamim/search-api-bench/internal/debug"
 	"github.com/lamim/search-api-bench/internal/metrics"
 	"github.com/lamim/search-api-bench/internal/progress"
 	"github.com/lamim/search-api-bench/internal/providers"
@@ -18,19 +19,21 @@ import (
 
 // Runner executes benchmark tests
 type Runner struct {
-	providers []providers.Provider
-	config    *config.Config
-	collector *metrics.Collector
-	progress  *progress.Manager
+	providers   []providers.Provider
+	config      *config.Config
+	collector   *metrics.Collector
+	progress    *progress.Manager
+	debugLogger *debug.Logger
 }
 
 // NewRunner creates a new test runner
-func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Manager) *Runner {
+func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Manager, debugLog *debug.Logger) *Runner {
 	return &Runner{
-		providers: provs,
-		config:    cfg,
-		collector: metrics.NewCollector(),
-		progress:  prog,
+		providers:   provs,
+		config:      cfg,
+		collector:   metrics.NewCollector(),
+		progress:    prog,
+		debugLogger: debugLog,
 	}
 }
 
@@ -85,6 +88,12 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 		Timestamp: time.Now(),
 	}
 
+	// Start debug logging for this test
+	var testLog *debug.TestLog
+	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+		testLog = r.debugLogger.StartTest(prov.Name(), test.Name, test.Type)
+	}
+
 	// Report test start to progress manager
 	if r.progress != nil {
 		r.progress.StartTest(prov.Name(), test.Name)
@@ -96,11 +105,16 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 
 	switch test.Type {
 	case "search":
-		r.runSearchTest(timeoutCtx, test, prov, &result)
+		r.runSearchTest(timeoutCtx, test, prov, &result, testLog)
 	case "extract":
-		r.runExtractTest(timeoutCtx, test, prov, &result)
+		r.runExtractTest(timeoutCtx, test, prov, &result, testLog)
 	case "crawl":
-		r.runCrawlTest(timeoutCtx, test, prov, &result)
+		r.runCrawlTest(timeoutCtx, test, prov, &result, testLog)
+	}
+
+	// End debug logging for this test
+	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+		r.debugLogger.EndTest(testLog)
 	}
 
 	// Report test completion to progress manager
@@ -115,16 +129,22 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 	r.collector.AddResult(result)
 }
 
-func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result) {
+func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
 	opts := providers.DefaultSearchOptions()
 	opts.MaxResults = 5
 	opts.IncludeAnswer = true
 
+	startTime := time.Now()
 	searchResult, err := prov.Search(ctx, test.Query, opts)
+	latency := time.Since(startTime)
+
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
 		result.ErrorCategory = categorizeError(err)
+		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+			r.debugLogger.LogError(testLog, err.Error(), result.ErrorCategory, "search execution")
+		}
 		if r.progress == nil || !r.progress.IsEnabled() {
 			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
 		}
@@ -135,6 +155,13 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 	result.Latency = searchResult.Latency
 	result.CreditsUsed = searchResult.CreditsUsed
 	result.ResultsCount = searchResult.TotalResults
+
+	// Log debug info
+	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+		r.debugLogger.SetMetadata(testLog, "query", test.Query)
+		r.debugLogger.SetMetadata(testLog, "result_count", searchResult.TotalResults)
+		r.debugLogger.SetMetadata(testLog, "latency_ms", latency.Milliseconds())
+	}
 
 	// Calculate content length from all results
 	contentLength := 0
@@ -167,14 +194,20 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 	}
 }
 
-func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result) {
+func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
 	opts := providers.DefaultExtractOptions()
 
+	startTime := time.Now()
 	extractResult, err := prov.Extract(ctx, test.URL, opts)
+	latency := time.Since(startTime)
+
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
 		result.ErrorCategory = categorizeError(err)
+		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+			r.debugLogger.LogError(testLog, err.Error(), result.ErrorCategory, "extract execution")
+		}
 		if r.progress == nil || !r.progress.IsEnabled() {
 			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
 		}
@@ -185,6 +218,13 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 	result.Latency = extractResult.Latency
 	result.CreditsUsed = extractResult.CreditsUsed
 	result.ContentLength = len(extractResult.Content)
+
+	// Log debug info
+	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+		r.debugLogger.SetMetadata(testLog, "url", test.URL)
+		r.debugLogger.SetMetadata(testLog, "content_length", len(extractResult.Content))
+		r.debugLogger.SetMetadata(testLog, "latency_ms", latency.Milliseconds())
+	}
 
 	// Check expected content
 	if r.progress == nil || !r.progress.IsEnabled() {
@@ -205,7 +245,7 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 	}
 }
 
-func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result) {
+func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
 	opts := providers.DefaultCrawlOptions()
 	if test.MaxPages > 0 {
 		opts.MaxPages = test.MaxPages
@@ -214,11 +254,17 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 		opts.MaxDepth = test.MaxDepth
 	}
 
+	startTime := time.Now()
 	crawlResult, err := prov.Crawl(ctx, test.URL, opts)
+	latency := time.Since(startTime)
+
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
 		result.ErrorCategory = categorizeError(err)
+		if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+			r.debugLogger.LogError(testLog, err.Error(), result.ErrorCategory, "crawl execution")
+		}
 		if r.progress == nil || !r.progress.IsEnabled() {
 			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
 		}
@@ -229,6 +275,15 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	result.Latency = crawlResult.Latency
 	result.CreditsUsed = crawlResult.CreditsUsed
 	result.ResultsCount = crawlResult.TotalPages
+
+	// Log debug info
+	if r.debugLogger != nil && r.debugLogger.IsEnabled() {
+		r.debugLogger.SetMetadata(testLog, "url", test.URL)
+		r.debugLogger.SetMetadata(testLog, "pages_crawled", crawlResult.TotalPages)
+		r.debugLogger.SetMetadata(testLog, "max_pages", opts.MaxPages)
+		r.debugLogger.SetMetadata(testLog, "max_depth", opts.MaxDepth)
+		r.debugLogger.SetMetadata(testLog, "latency_ms", latency.Milliseconds())
+	}
 
 	// Calculate total content length
 	contentLength := 0

@@ -6,9 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lamim/search-api-bench/internal/config"
+	"github.com/lamim/search-api-bench/internal/debug"
 	"github.com/lamim/search-api-bench/internal/evaluator"
 	"github.com/lamim/search-api-bench/internal/metrics"
 	"github.com/lamim/search-api-bench/internal/progress"
@@ -19,18 +22,31 @@ import (
 	"github.com/lamim/search-api-bench/internal/report"
 )
 
-func main() {
-	var (
-		configPath    = flag.String("config", "config.toml", "Path to configuration file")
-		outputDir     = flag.String("output", "", "Output directory for reports (overrides config)")
-		providersFlag = flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local")
-		format        = flag.String("format", "all", "Report format: all, html, md, json")
-		noProgress    = flag.Bool("no-progress", false, "Disable progress bar (useful for CI)")
-		verbose       = flag.Bool("verbose", false, "Enable verbose output with full error details")
-	)
-	flag.Parse()
+type cliFlags struct {
+	configPath    *string
+	outputDir     *string
+	providersFlag *string
+	format        *string
+	noProgress    *bool
+	verbose       *bool
+	debugMode     *bool
+	quickMode     *bool
+}
 
-	// Load .env file if present
+func parseFlags() *cliFlags {
+	return &cliFlags{
+		configPath:    flag.String("config", "config.toml", "Path to configuration file"),
+		outputDir:     flag.String("output", "", "Output directory for reports (overrides config)"),
+		providersFlag: flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local"),
+		format:        flag.String("format", "all", "Report format: all, html, md, json"),
+		noProgress:    flag.Bool("no-progress", false, "Disable progress bar (useful for CI)"),
+		verbose:       flag.Bool("verbose", false, "Enable verbose output with full error details"),
+		debugMode:     flag.Bool("debug", false, "Enable debug logging with full request/response data"),
+		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
+	}
+}
+
+func loadEnvFile() {
 	if data, err := os.ReadFile(".env"); err == nil {
 		lines := strings.Split(string(data), "\n")
 		for _, line := range lines {
@@ -42,62 +58,54 @@ func main() {
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
-				// Remove quotes if present
 				value = strings.Trim(value, `"'`)
 				_ = os.Setenv(key, value)
 			}
 		}
 	}
+}
 
-	// Load configuration
-	cfg, err := config.Load(*configPath)
+func main() {
+	flags := parseFlags()
+	flag.Parse()
+
+	loadEnvFile()
+
+	cfg, err := config.Load(*flags.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Override output dir if provided
-	if *outputDir != "" {
-		cfg.General.OutputDir = *outputDir
+	if *flags.outputDir != "" {
+		cfg.General.OutputDir = *flags.outputDir
 	}
 
-	// Print banner
+	if *flags.quickMode {
+		cfg = applyQuickMode(cfg)
+	}
+
+	finalOutputDir, err := ensureOutputDir(cfg.General.OutputDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
+		os.Exit(1)
+	}
+	cfg.General.OutputDir = finalOutputDir
+
+	debugLogger := debug.NewLogger(*flags.debugMode, cfg.General.OutputDir)
+
 	printBanner()
 
-	// Initialize providers
-	var provs []providers.Provider
-	providerNames := parseProviders(*providersFlag)
-
-	for _, name := range providerNames {
-		switch name {
-		case "firecrawl":
-			client, err := firecrawl.NewClient()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Firecrawl: %v\n", err)
-				continue
-			}
-			provs = append(provs, client)
-			fmt.Printf("✓ Initialized Firecrawl provider\n")
-
-		case "tavily":
-			client, err := tavily.NewClient()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Tavily: %v\n", err)
-				continue
-			}
-			provs = append(provs, client)
-			fmt.Printf("✓ Initialized Tavily provider\n")
-
-		case "local":
-			client, err := local.NewClient()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Local crawler: %v\n", err)
-				continue
-			}
-			provs = append(provs, client)
-			fmt.Printf("✓ Initialized Local crawler provider (no API key required)\n")
-		}
+	if *flags.quickMode {
+		fmt.Println("⚡ Quick mode enabled: running subset of tests with reduced parameters")
+		fmt.Printf("   Tests: %d | Timeout: %s\n\n", len(cfg.Tests), cfg.General.Timeout)
 	}
+
+	if *flags.debugMode {
+		fmt.Printf("🐛 Debug mode enabled: logging to %s\n\n", debugLogger.GetOutputPath())
+	}
+
+	provs := initializeProviders(flags.providersFlag, debugLogger)
 
 	if len(provs) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no providers available. Please check your API keys.\n")
@@ -108,25 +116,19 @@ func main() {
 	totalTests := len(cfg.Tests) * len(provs)
 
 	// Get provider names for progress display
-	providerNames = make([]string, 0, len(provs))
+	providerNames := make([]string, 0, len(provs))
 	for _, p := range provs {
 		providerNames = append(providerNames, p.Name())
 	}
 
 	// Create progress manager
-	prog := progress.NewManager(totalTests, providerNames, !*noProgress)
+	prog := progress.NewManager(totalTests, providerNames, !*flags.noProgress)
 
-	// Create runner with progress manager
-	runner := evaluator.NewRunner(cfg, provs, prog)
-
-	// Ensure output directory exists
-	if err = runner.EnsureOutputDir(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
-		os.Exit(1)
-	}
+	// Create runner with progress manager and debug logger
+	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger)
 
 	// Print initial banner if not using progress bar
-	if *noProgress {
+	if *flags.noProgress {
 		printBanner()
 	}
 
@@ -137,44 +139,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	_ = verbose // Reserved for future use
+	_ = flags.verbose // Reserved for future use
 
-	// Generate reports
-	fmt.Println("\nGenerating reports...")
-	gen := report.NewGenerator(runner.GetCollector(), cfg.General.OutputDir)
-
-	formats := parseFormats(*format)
-	for _, f := range formats {
-		switch f {
-		case "html":
-			if err := gen.GenerateHTML(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error generating HTML report: %v\n", err)
-			} else {
-				fmt.Printf("✓ Generated HTML report: %s/report.html\n", cfg.General.OutputDir)
-			}
-		case "md":
-			if err := gen.GenerateMarkdown(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error generating Markdown report: %v\n", err)
-			} else {
-				fmt.Printf("✓ Generated Markdown report: %s/report.md\n", cfg.General.OutputDir)
-			}
-		case "json":
-			if err := gen.GenerateJSON(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error generating JSON report: %v\n", err)
-			} else {
-				fmt.Printf("✓ Generated JSON report: %s/report.json\n", cfg.General.OutputDir)
-			}
-		case "all":
-			if err := gen.GenerateAll(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error generating reports: %v\n", err)
-			} else {
-				fmt.Printf("✓ Generated all reports in: %s/\n", cfg.General.OutputDir)
-			}
+	// Finalize debug logging
+	if *flags.debugMode {
+		if err := debugLogger.Finalize(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write debug log: %v\n", err)
+		} else {
+			fmt.Printf("✓ Debug log written to: %s\n", debugLogger.GetOutputPath())
 		}
 	}
 
-	// Print summary
-	printSummary(runner.GetCollector())
+	// Generate reports
+	generateReports(flags.format, runner.GetCollector(), cfg.General.OutputDir)
 }
 
 func printBanner() {
@@ -207,6 +184,84 @@ func printSummary(collector *metrics.Collector) {
 	fmt.Println("View detailed results in the output directory.")
 }
 
+func initializeProviders(providersFlag *string, debugLogger *debug.Logger) []providers.Provider {
+	var provs []providers.Provider
+	providerNames := parseProviders(*providersFlag)
+
+	for _, name := range providerNames {
+		switch name {
+		case "firecrawl":
+			client, err := firecrawl.NewClient()
+			debugLogger.LogProviderInit("firecrawl", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Firecrawl: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Firecrawl provider\n")
+
+		case "tavily":
+			client, err := tavily.NewClient()
+			debugLogger.LogProviderInit("tavily", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Tavily: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Tavily provider\n")
+
+		case "local":
+			client, err := local.NewClient()
+			debugLogger.LogProviderInit("local", err)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize Local crawler: %v\n", err)
+				continue
+			}
+			provs = append(provs, client)
+			fmt.Printf("✓ Initialized Local crawler provider (no API key required)\n")
+		}
+	}
+
+	return provs
+}
+
+func generateReports(formatFlag *string, collector *metrics.Collector, outputDir string) {
+	fmt.Println("\nGenerating reports...")
+	gen := report.NewGenerator(collector, outputDir)
+
+	formats := parseFormats(*formatFlag)
+	for _, f := range formats {
+		switch f {
+		case "html":
+			if err := gen.GenerateHTML(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating HTML report: %v\n", err)
+			} else {
+				fmt.Printf("✓ Generated HTML report: %s/report.html\n", outputDir)
+			}
+		case "md":
+			if err := gen.GenerateMarkdown(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating Markdown report: %v\n", err)
+			} else {
+				fmt.Printf("✓ Generated Markdown report: %s/report.md\n", outputDir)
+			}
+		case "json":
+			if err := gen.GenerateJSON(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating JSON report: %v\n", err)
+			} else {
+				fmt.Printf("✓ Generated JSON report: %s/report.json\n", outputDir)
+			}
+		case "all":
+			if err := gen.GenerateAll(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error generating reports: %v\n", err)
+			} else {
+				fmt.Printf("✓ Generated all reports in: %s/\n", outputDir)
+			}
+		}
+	}
+
+	printSummary(collector)
+}
+
 func parseProviders(s string) []string {
 	if s == "all" {
 		return []string{"firecrawl", "tavily", "local"}
@@ -219,4 +274,76 @@ func parseFormats(s string) []string {
 		return []string{"all"}
 	}
 	return strings.Split(s, ",")
+}
+
+// ensureOutputDir creates a timestamped subdirectory for results
+func ensureOutputDir(baseDir string) (string, error) {
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	sessionDir := filepath.Join(baseDir, timestamp)
+
+	if err := os.MkdirAll(sessionDir, 0750); err != nil {
+		return "", err
+	}
+
+	return sessionDir, nil
+}
+
+// applyQuickMode modifies the configuration for quick testing
+func applyQuickMode(cfg *config.Config) *config.Config {
+	// Create a copy of the config
+	quickCfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency: cfg.General.Concurrency,
+			Timeout:     "20s", // Shorter timeout for quick mode
+			OutputDir:   cfg.General.OutputDir,
+		},
+		Tests: []config.TestConfig{},
+	}
+
+	// Select up to 3 tests: one of each type (search, extract, crawl)
+	var hasSearch, hasExtract, hasCrawl bool
+	for _, test := range cfg.Tests {
+		if len(quickCfg.Tests) >= 3 {
+			break
+		}
+
+		switch test.Type {
+		case "search":
+			if !hasSearch {
+				quickCfg.Tests = append(quickCfg.Tests, test)
+				hasSearch = true
+			}
+		case "extract":
+			if !hasExtract {
+				quickCfg.Tests = append(quickCfg.Tests, test)
+				hasExtract = true
+			}
+		case "crawl":
+			if !hasCrawl {
+				// Reduce crawl parameters for quick mode
+				quickTest := test
+				if quickTest.MaxPages > 2 {
+					quickTest.MaxPages = 2
+				}
+				if quickTest.MaxDepth > 1 {
+					quickTest.MaxDepth = 1
+				}
+				quickCfg.Tests = append(quickCfg.Tests, quickTest)
+				hasCrawl = true
+			}
+		}
+	}
+
+	// If we couldn't find one of each type, just take the first available tests
+	if len(quickCfg.Tests) == 0 && len(cfg.Tests) > 0 {
+		maxTests := 3
+		if len(cfg.Tests) < maxTests {
+			maxTests = len(cfg.Tests)
+		}
+		for i := 0; i < maxTests; i++ {
+			quickCfg.Tests = append(quickCfg.Tests, cfg.Tests[i])
+		}
+	}
+
+	return quickCfg
 }
