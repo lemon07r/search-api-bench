@@ -609,6 +609,25 @@ func TestCrawl_EmptyMap(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(response)
+		} else if r.URL.Path == "/extract" {
+			// When map is empty, we fall back to extracting the start URL
+			response := extractResponse{
+				Results: []struct {
+					URL        string   `json:"url"`
+					Title      string   `json:"title"`
+					RawContent string   `json:"raw_content"`
+					Images     []string `json:"images"`
+				}{
+					{
+						URL:        "https://example.com",
+						Title:      "Example",
+						RawContent: "Example content",
+						Images:     []string{},
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
 		}
 	}))
 	defer server.Close()
@@ -624,7 +643,8 @@ func TestCrawl_EmptyMap(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(result.Pages) != 0 {
-		t.Errorf("expected 0 pages for empty map, got %d", len(result.Pages))
+	// Should have 1 page from fallback extract
+	if len(result.Pages) != 1 {
+		t.Errorf("expected 1 page from fallback extract, got %d", len(result.Pages))
 	}
 }

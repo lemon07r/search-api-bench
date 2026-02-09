@@ -12,6 +12,7 @@ import (
 
 	"github.com/lamim/search-api-bench/internal/config"
 	"github.com/lamim/search-api-bench/internal/metrics"
+	"github.com/lamim/search-api-bench/internal/progress"
 	"github.com/lamim/search-api-bench/internal/providers"
 )
 
@@ -20,21 +21,29 @@ type Runner struct {
 	providers []providers.Provider
 	config    *config.Config
 	collector *metrics.Collector
+	progress  *progress.Manager
 }
 
 // NewRunner creates a new test runner
-func NewRunner(cfg *config.Config, provs []providers.Provider) *Runner {
+func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Manager) *Runner {
 	return &Runner{
 		providers: provs,
 		config:    cfg,
 		collector: metrics.NewCollector(),
+		progress:  prog,
 	}
 }
 
 // Run executes all tests against all providers
 func (r *Runner) Run(ctx context.Context) error {
-	fmt.Printf("Starting benchmark with %d tests against %d providers\n", len(r.config.Tests), len(r.providers))
-	fmt.Printf("Concurrency: %d, Timeout: %s\n\n", r.config.General.Concurrency, r.config.General.Timeout)
+	if r.progress != nil && r.progress.IsEnabled() {
+		// Progress bar will be shown, print minimal header
+		fmt.Println("Starting benchmark...")
+	} else {
+		// No progress bar, print full header
+		fmt.Printf("Starting benchmark with %d tests against %d providers\n", len(r.config.Tests), len(r.providers))
+		fmt.Printf("Concurrency: %d, Timeout: %s\n\n", r.config.General.Concurrency, r.config.General.Timeout)
+	}
 
 	// Create semaphore for concurrency control
 	sem := make(chan struct{}, r.config.General.Concurrency)
@@ -55,6 +64,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	wg.Wait()
+
+	if r.progress != nil {
+		r.progress.Finish()
+	}
+
 	fmt.Println("\nBenchmark completed!")
 
 	return nil
@@ -71,7 +85,14 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 		Timestamp: time.Now(),
 	}
 
-	fmt.Printf("[%s] Running '%s'...\n", prov.Name(), test.Name)
+	// Report test start to progress manager
+	if r.progress != nil {
+		r.progress.StartTest(prov.Name(), test.Name)
+	}
+
+	if r.progress == nil || !r.progress.IsEnabled() {
+		fmt.Printf("[%s] Running '%s'...\n", prov.Name(), test.Name)
+	}
 
 	switch test.Type {
 	case "search":
@@ -80,6 +101,15 @@ func (r *Runner) runTest(ctx context.Context, test config.TestConfig, prov provi
 		r.runExtractTest(timeoutCtx, test, prov, &result)
 	case "crawl":
 		r.runCrawlTest(timeoutCtx, test, prov, &result)
+	}
+
+	// Report test completion to progress manager
+	if r.progress != nil {
+		var testErr error
+		if !result.Success {
+			testErr = fmt.Errorf("%s", result.Error)
+		}
+		r.progress.CompleteTest(prov.Name(), test.Name, result.Success, testErr)
 	}
 
 	r.collector.AddResult(result)
@@ -94,7 +124,10 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
-		fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
+		result.ErrorCategory = categorizeError(err)
+		if r.progress == nil || !r.progress.IsEnabled() {
+			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
+		}
 		return
 	}
 
@@ -111,24 +144,26 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 	result.ContentLength = contentLength
 
 	// Check expected topics
-	if len(test.ExpectedTopics) > 0 {
-		allContent := ""
-		for _, item := range searchResult.Results {
-			allContent += item.Title + " " + item.Content + " "
-		}
-		allContent = strings.ToLower(allContent)
-
-		matchedTopics := 0
-		for _, topic := range test.ExpectedTopics {
-			if strings.Contains(allContent, strings.ToLower(topic)) {
-				matchedTopics++
+	if r.progress == nil || !r.progress.IsEnabled() {
+		if len(test.ExpectedTopics) > 0 {
+			allContent := ""
+			for _, item := range searchResult.Results {
+				allContent += item.Title + " " + item.Content + " "
 			}
+			allContent = strings.ToLower(allContent)
+
+			matchedTopics := 0
+			for _, topic := range test.ExpectedTopics {
+				if strings.Contains(allContent, strings.ToLower(topic)) {
+					matchedTopics++
+				}
+			}
+			fmt.Printf("  ✓ %s: %d results, %v latency, %d/%d topics matched\n",
+				prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), matchedTopics, len(test.ExpectedTopics))
+		} else {
+			fmt.Printf("  ✓ %s: %d results, %v latency, %d credits\n",
+				prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), searchResult.CreditsUsed)
 		}
-		fmt.Printf("  ✓ %s: %d results, %v latency, %d/%d topics matched\n",
-			prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), matchedTopics, len(test.ExpectedTopics))
-	} else {
-		fmt.Printf("  ✓ %s: %d results, %v latency, %d credits\n",
-			prov.Name(), searchResult.TotalResults, searchResult.Latency.Round(time.Millisecond), searchResult.CreditsUsed)
 	}
 }
 
@@ -139,7 +174,10 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
-		fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
+		result.ErrorCategory = categorizeError(err)
+		if r.progress == nil || !r.progress.IsEnabled() {
+			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
+		}
 		return
 	}
 
@@ -149,19 +187,21 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 	result.ContentLength = len(extractResult.Content)
 
 	// Check expected content
-	if len(test.ExpectedContent) > 0 {
-		contentLower := strings.ToLower(extractResult.Content)
-		matchedContent := 0
-		for _, expected := range test.ExpectedContent {
-			if strings.Contains(contentLower, strings.ToLower(expected)) {
-				matchedContent++
+	if r.progress == nil || !r.progress.IsEnabled() {
+		if len(test.ExpectedContent) > 0 {
+			contentLower := strings.ToLower(extractResult.Content)
+			matchedContent := 0
+			for _, expected := range test.ExpectedContent {
+				if strings.Contains(contentLower, strings.ToLower(expected)) {
+					matchedContent++
+				}
 			}
+			fmt.Printf("  ✓ %s: %d chars, %v latency, %d/%d content items matched\n",
+				prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), matchedContent, len(test.ExpectedContent))
+		} else {
+			fmt.Printf("  ✓ %s: %d chars, %v latency, %d credits\n",
+				prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), extractResult.CreditsUsed)
 		}
-		fmt.Printf("  ✓ %s: %d chars, %v latency, %d/%d content items matched\n",
-			prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), matchedContent, len(test.ExpectedContent))
-	} else {
-		fmt.Printf("  ✓ %s: %d chars, %v latency, %d credits\n",
-			prov.Name(), len(extractResult.Content), extractResult.Latency.Round(time.Millisecond), extractResult.CreditsUsed)
 	}
 }
 
@@ -178,7 +218,10 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
-		fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
+		result.ErrorCategory = categorizeError(err)
+		if r.progress == nil || !r.progress.IsEnabled() {
+			fmt.Printf("  ✗ %s failed: %v\n", prov.Name(), err)
+		}
 		return
 	}
 
@@ -194,8 +237,31 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	}
 	result.ContentLength = contentLength
 
-	fmt.Printf("  ✓ %s: %d pages, %d chars, %v latency, %d credits\n",
-		prov.Name(), crawlResult.TotalPages, contentLength, crawlResult.Latency.Round(time.Millisecond), crawlResult.CreditsUsed)
+	if r.progress == nil || !r.progress.IsEnabled() {
+		fmt.Printf("  ✓ %s: %d pages, %d chars, %v latency, %d credits\n",
+			prov.Name(), crawlResult.TotalPages, contentLength, crawlResult.Latency.Round(time.Millisecond), crawlResult.CreditsUsed)
+	}
+}
+
+// categorizeError categorizes an error for better reporting
+func categorizeError(err error) string {
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "context deadline exceeded"):
+		return "timeout"
+	case strings.Contains(errStr, "401") || strings.Contains(errStr, "403"):
+		return "auth"
+	case strings.Contains(errStr, "429"):
+		return "rate_limit"
+	case strings.Contains(errStr, "5") && len(errStr) > 3 && errStr[len(errStr)-3] == '5':
+		return "server_error"
+	case strings.Contains(errStr, "404"):
+		return "not_found"
+	case strings.Contains(errStr, "scrape") || strings.Contains(errStr, "crawl"):
+		return "crawl_failed"
+	default:
+		return "other"
+	}
 }
 
 // GetCollector returns the metrics collector

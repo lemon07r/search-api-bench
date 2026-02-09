@@ -11,6 +11,7 @@ import (
 	"github.com/lamim/search-api-bench/internal/config"
 	"github.com/lamim/search-api-bench/internal/evaluator"
 	"github.com/lamim/search-api-bench/internal/metrics"
+	"github.com/lamim/search-api-bench/internal/progress"
 	"github.com/lamim/search-api-bench/internal/providers"
 	"github.com/lamim/search-api-bench/internal/providers/firecrawl"
 	"github.com/lamim/search-api-bench/internal/providers/local"
@@ -24,6 +25,8 @@ func main() {
 		outputDir     = flag.String("output", "", "Output directory for reports (overrides config)")
 		providersFlag = flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local")
 		format        = flag.String("format", "all", "Report format: all, html, md, json")
+		noProgress    = flag.Bool("no-progress", false, "Disable progress bar (useful for CI)")
+		verbose       = flag.Bool("verbose", false, "Enable verbose output with full error details")
 	)
 	flag.Parse()
 
@@ -101,13 +104,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create runner
-	runner := evaluator.NewRunner(cfg, provs)
+	// Calculate total tests
+	totalTests := len(cfg.Tests) * len(provs)
+
+	// Get provider names for progress display
+	providerNames = make([]string, 0, len(provs))
+	for _, p := range provs {
+		providerNames = append(providerNames, p.Name())
+	}
+
+	// Create progress manager
+	prog := progress.NewManager(totalTests, providerNames, !*noProgress)
+
+	// Create runner with progress manager
+	runner := evaluator.NewRunner(cfg, provs, prog)
 
 	// Ensure output directory exists
-	if err := runner.EnsureOutputDir(); err != nil {
+	if err = runner.EnsureOutputDir(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Print initial banner if not using progress bar
+	if *noProgress {
+		printBanner()
 	}
 
 	// Run benchmarks
@@ -116,6 +136,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error running benchmarks: %v\n", err)
 		os.Exit(1)
 	}
+
+	_ = verbose // Reserved for future use
 
 	// Generate reports
 	fmt.Println("\nGenerating reports...")
