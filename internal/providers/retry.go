@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -76,6 +76,7 @@ func (rc *RetryConfig) CalculateBackoff(attempt int) time.Duration {
 	backoff := float64(rc.InitialBackoff) * math.Pow(rc.BackoffFactor, float64(attempt))
 
 	// Add jitter (±25%) to avoid thundering herd
+	//nolint:gosec // Math/rand/v2 is sufficient for jitter; crypto/rand is unnecessary for this use case
 	jitter := backoff * 0.25 * (2*rand.Float64() - 1)
 	backoff += jitter
 

@@ -25,6 +25,12 @@ make build
 ./build/search-api-bench -providers firecrawl
 ./build/search-api-bench -providers local  # No API key needed
 
+# Exclude local provider (API-only testing)
+./build/search-api-bench -no-local
+
+# Exclude search tests (extract/crawl only)
+./build/search-api-bench -no-search
+
 # Quick test mode (3 tests, 20s timeout)
 ./build/search-api-bench -quick
 
@@ -98,6 +104,8 @@ max_depth = 2
 | `-debug` | Request/response logging | `false` |
 | `-debug-full` | Complete bodies + timing breakdown | `false` |
 | `-no-progress` | Disable progress bar | `false` |
+| `-no-search` | Exclude search tests | `false` |
+| `-no-local` | Exclude local provider | `false` |
 
 ## Reports
 

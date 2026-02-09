@@ -301,6 +301,61 @@ func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov 
 	}
 }
 
+// errorPattern maps error substrings to their categories
+type errorPattern struct {
+	patterns []string
+	category string
+}
+
+// errorPatterns defines all error categorization patterns in priority order
+var errorPatterns = []errorPattern{
+	// Timeout errors
+	{
+		patterns: []string{"timeout", "context deadline exceeded", "i/o timeout"},
+		category: "timeout",
+	},
+	// Rate limit errors - checked before auth since "too many requests" can appear with 429
+	{
+		patterns: []string{"rate limit", "ratelimit", "too many requests", "429", "quota exceeded", "limit exceeded"},
+		category: "rate_limit",
+	},
+	// Auth errors
+	{
+		patterns: []string{"401", "403", "unauthorized", "authentication", "api key"},
+		category: "auth",
+	},
+	// Server errors (5xx)
+	{
+		patterns: []string{"500", "502", "503", "504", "internal server error", "bad gateway", "service unavailable"},
+		category: "server_error",
+	},
+	// Client errors (4xx)
+	{
+		patterns: []string{"400", "404", "405", "422", "bad request", "not found", "validation"},
+		category: "client_error",
+	},
+	// Network errors
+	{
+		patterns: []string{"connection refused", "no such host", "network", "dns", "temporary failure"},
+		category: "network",
+	},
+	// Parse errors
+	{
+		patterns: []string{"unmarshal", "parse", "invalid character", "invalid syntax"},
+		category: "parse",
+	},
+	// Crawl/scrape specific errors
+	{
+		patterns: []string{"crawl", "scrape", "not supported"},
+		category: "crawl_failed",
+	},
+	// Context canceled
+	{
+		patterns: []string{"context canceled"},
+		category: "canceled",
+	},
+}
+
 // categorizeError categorizes an error for better reporting
 func categorizeError(err error) string {
 	if err == nil {
@@ -309,78 +364,15 @@ func categorizeError(err error) string {
 
 	errStr := strings.ToLower(err.Error())
 
-	switch {
-	// Timeout errors
-	case strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "context deadline exceeded") ||
-		strings.Contains(errStr, "i/o timeout"):
-		return "timeout"
-
-	// Rate limit errors - check before auth since "too many requests" can appear with 429
-	case strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "ratelimit") ||
-		strings.Contains(errStr, "too many requests") ||
-		strings.Contains(errStr, "429") ||
-		strings.Contains(errStr, "quota exceeded") ||
-		strings.Contains(errStr, "limit exceeded"):
-		return "rate_limit"
-
-	// Auth errors
-	case strings.Contains(errStr, "401") ||
-		strings.Contains(errStr, "403") ||
-		strings.Contains(errStr, "unauthorized") ||
-		strings.Contains(errStr, "authentication") ||
-		strings.Contains(errStr, "api key"):
-		return "auth"
-
-	// Server errors (5xx)
-	case strings.Contains(errStr, "500") ||
-		strings.Contains(errStr, "502") ||
-		strings.Contains(errStr, "503") ||
-		strings.Contains(errStr, "504") ||
-		strings.Contains(errStr, "internal server error") ||
-		strings.Contains(errStr, "bad gateway") ||
-		strings.Contains(errStr, "service unavailable"):
-		return "server_error"
-
-	// Client errors (4xx)
-	case strings.Contains(errStr, "400") ||
-		strings.Contains(errStr, "404") ||
-		strings.Contains(errStr, "405") ||
-		strings.Contains(errStr, "422") ||
-		strings.Contains(errStr, "bad request") ||
-		strings.Contains(errStr, "not found") ||
-		strings.Contains(errStr, "validation"):
-		return "client_error"
-
-	// Network errors
-	case strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "no such host") ||
-		strings.Contains(errStr, "network") ||
-		strings.Contains(errStr, "dns") ||
-		strings.Contains(errStr, "temporary failure"):
-		return "network"
-
-	// Parse errors (JSON unmarshaling failures, etc.)
-	case strings.Contains(errStr, "unmarshal") ||
-		strings.Contains(errStr, "parse") ||
-		strings.Contains(errStr, "invalid character") ||
-		strings.Contains(errStr, "invalid syntax"):
-		return "parse"
-
-	// Crawl/scrape specific errors
-	case strings.Contains(errStr, "crawl") ||
-		strings.Contains(errStr, "scrape") ||
-		strings.Contains(errStr, "not supported"):
-		return "crawl_failed"
-
-	// Context canceled
-	case strings.Contains(errStr, "context canceled"):
-		return "canceled"
-
-	default:
-		return "other"
+	for _, ep := range errorPatterns {
+		for _, pattern := range ep.patterns {
+			if strings.Contains(errStr, pattern) {
+				return ep.category
+			}
+		}
 	}
+
+	return "other"
 }
 
 // GetCollector returns the metrics collector
