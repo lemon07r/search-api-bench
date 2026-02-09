@@ -171,8 +171,8 @@ Running the **full benchmark suite** (13 tests):
 | Tavily | ~$0.01-0.02 | 1,000/mo |
 | Brave | ~$0.03 | 2,000/mo |
 | Exa | ~$0.03-0.15 | $10 credits |
-| Jina | ~$0.00 | 10M tokens |
-| Mixedbread | ~$0.00-0.01 | 1,000 files |
+| Jina | ~$0.001-0.01 | 10M tokens |
+| Mixedbread | ~$0.01-0.03 | 1,000 files |
 | Local | Free | Unlimited |
 
 ## Libraries for Custom Integration

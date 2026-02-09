@@ -202,7 +202,11 @@ func (g *Generator) generateChartScripts() string {
 	totalCredits := make([]int, len(providers))
 	successRates := make([]float64, len(providers))
 
-	colors := []string{"'#ff6b35'", "'#3498db'"}
+	baseColors := []string{"'#ff6b35'", "'#3498db'", "'#27ae60'", "'#9b59b6'", "'#e74c3c'", "'#f39c12'", "'#1abc9c'"}
+	colors := make([]string, len(providers))
+	for i := range providers {
+		colors[i] = baseColors[i%len(baseColors)]
+	}
 
 	for i, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
@@ -293,9 +297,9 @@ func (g *Generator) generateChartScripts() string {
                 }
             }
         });
-`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors[:len(providers)]),
-		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors[:len(providers)]),
-		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors[:len(providers)]))
+`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
+		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors),
+		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors))
 }
 
 func joinStrings(strs []string) string {
