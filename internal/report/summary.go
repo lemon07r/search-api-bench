@@ -52,23 +52,34 @@ type providerSummary struct {
 	summary *metrics.Summary
 }
 
+// formatCostUSD formats a cost value in USD for display
+func formatCostUSD(cost float64) string {
+	if cost == 0 {
+		return "$0.00"
+	}
+	if cost < 0.01 {
+		return fmt.Sprintf("$%.4f", cost)
+	}
+	return fmt.Sprintf("$%.2f", cost)
+}
+
 // writeComparisonTable writes the comparison table for all providers
 func (g *Generator) writeComparisonTable(sb *strings.Builder, providers []string) {
 	sb.WriteString("### Summary by Provider\n\n")
-	sb.WriteString("| Provider | Tests | Success Rate | Avg Latency | Total Credits | Avg Content |\n")
-	sb.WriteString("|----------|-------|--------------|-------------|---------------|-------------|\n")
+	sb.WriteString("| Provider | Tests | Success Rate | Avg Latency | Total Cost (USD) | Avg Content |\n")
+	sb.WriteString("|----------|-------|--------------|-------------|------------------|-------------|\n")
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
 		successRate := float64(0)
 		if summary.TotalTests > 0 {
 			successRate = float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
 		}
-		fmt.Fprintf(sb, "| %s | %d | %.1f%% | %s | %d | %.0f chars |\n",
+		fmt.Fprintf(sb, "| %s | %d | %.1f%% | %s | %s | %.0f chars |\n",
 			provider,
 			summary.TotalTests,
 			successRate,
 			FormatLatency(summary.AvgLatency),
-			summary.TotalCreditsUsed,
+			formatCostUSD(summary.TotalCostUSD),
 			summary.AvgContentLength,
 		)
 	}
@@ -104,15 +115,15 @@ func (g *Generator) writeRankings(sb *strings.Builder, providers []string) {
 	}
 	sb.WriteString("\n")
 
-	// Cost ranking (by total credits used - lower is better)
-	sb.WriteString("**Cost (by total credits - lower is better):**\n")
+	// Cost ranking (by total USD cost - lower is better)
+	sb.WriteString("**Cost (by total USD cost - lower is better):**\n")
 	sortedByCost := make([]providerSummary, len(allSummaries))
 	copy(sortedByCost, allSummaries)
 	sort.Slice(sortedByCost, func(i, j int) bool {
-		return sortedByCost[i].summary.TotalCreditsUsed < sortedByCost[j].summary.TotalCreditsUsed
+		return sortedByCost[i].summary.TotalCostUSD < sortedByCost[j].summary.TotalCostUSD
 	})
 	for i, ps := range sortedByCost {
-		fmt.Fprintf(sb, "%d. **%s**: %d credits\n", i+1, ps.name, ps.summary.TotalCreditsUsed)
+		fmt.Fprintf(sb, "%d. **%s**: %s\n", i+1, ps.name, formatCostUSD(ps.summary.TotalCostUSD))
 	}
 	sb.WriteString("\n")
 
@@ -178,18 +189,18 @@ func (g *Generator) writePairwiseComparison(sb *strings.Builder, providers []str
 	fmt.Fprintf(sb, "- %s avg latency: %s\n", providers[0], FormatLatency(summary1.AvgLatency))
 	fmt.Fprintf(sb, "- %s avg latency: %s\n\n", providers[1], FormatLatency(summary2.AvgLatency))
 
-	sb.WriteString("**Cost Comparison:**\n")
-	if summary1.TotalCreditsUsed > 0 && summary2.TotalCreditsUsed > 0 {
-		costDiff := float64(summary2.TotalCreditsUsed-summary1.TotalCreditsUsed) / float64(summary1.TotalCreditsUsed) * 100
+	sb.WriteString("**Cost Comparison (USD):**\n")
+	if summary1.TotalCostUSD > 0 && summary2.TotalCostUSD > 0 {
+		costDiff := (summary2.TotalCostUSD - summary1.TotalCostUSD) / summary1.TotalCostUSD * 100
 		cheaper := providers[0]
-		if summary2.TotalCreditsUsed < summary1.TotalCreditsUsed {
+		if summary2.TotalCostUSD < summary1.TotalCostUSD {
 			cheaper = providers[1]
 			costDiff = -costDiff
 		}
-		fmt.Fprintf(sb, "- **%s** uses %.1f%% fewer credits\n", cheaper, costDiff)
+		fmt.Fprintf(sb, "- **%s** is %.1f%% cheaper\n", cheaper, costDiff)
 	}
-	fmt.Fprintf(sb, "- %s total credits: %d\n", providers[0], summary1.TotalCreditsUsed)
-	fmt.Fprintf(sb, "- %s total credits: %d\n\n", providers[1], summary2.TotalCreditsUsed)
+	fmt.Fprintf(sb, "- %s total cost: %s\n", providers[0], formatCostUSD(summary1.TotalCostUSD))
+	fmt.Fprintf(sb, "- %s total cost: %s\n\n", providers[1], formatCostUSD(summary2.TotalCostUSD))
 
 	sb.WriteString("**Content Volume Comparison:**\n")
 	if summary1.AvgContentLength > 0 && summary2.AvgContentLength > 0 {
@@ -230,18 +241,18 @@ func (g *Generator) GenerateMarkdown() error {
 
 	// Overview table
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString("| Provider | Tests | Success Rate | Avg Latency | Total Credits | Avg Content |\n")
-	sb.WriteString("|----------|-------|--------------|-------------|---------------|-------------|\n")
+	sb.WriteString("| Provider | Tests | Success Rate | Avg Latency | Total Cost (USD) | Avg Content |\n")
+	sb.WriteString("|----------|-------|--------------|-------------|------------------|-------------|\n")
 
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
 		successRate := float64(summary.SuccessfulTests) / float64(summary.TotalTests) * 100
-		sb.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %s | %d | %.0f chars |\n",
+		sb.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %s | %s | %.0f chars |\n",
 			provider,
 			summary.TotalTests,
 			successRate,
 			FormatLatency(summary.AvgLatency),
-			summary.TotalCreditsUsed,
+			formatCostUSD(summary.TotalCostUSD),
 			summary.AvgContentLength,
 		))
 	}
@@ -272,11 +283,11 @@ func (g *Generator) GenerateMarkdown() error {
 
 		// Use appropriate headers based on whether quality scores exist
 		if hasQualityScores {
-			sb.WriteString("| Provider | Status | Latency | Credits | Details | Quality |\n")
-			sb.WriteString("|----------|--------|---------|---------|---------|---------|\n")
+			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details | Quality |\n")
+			sb.WriteString("|----------|--------|---------|------------|---------|---------|\n")
 		} else {
-			sb.WriteString("| Provider | Status | Latency | Credits | Details |\n")
-			sb.WriteString("|----------|--------|---------|---------|---------|\n")
+			sb.WriteString("| Provider | Status | Latency | Cost (USD) | Details |\n")
+			sb.WriteString("|----------|--------|---------|------------|---------|\n")
 		}
 
 		results := g.collector.GetResultsByTest(testName)
@@ -301,20 +312,20 @@ func (g *Generator) GenerateMarkdown() error {
 				if r.QualityScore > 0 {
 					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s | %s |\n",
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
 					r.Provider,
 					status,
 					FormatLatency(r.Latency),
-					r.CreditsUsed,
+					formatCostUSD(r.CostUSD),
 					details,
 					qualityStr,
 				))
 			} else {
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %d | %s |\n",
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
 					r.Provider,
 					status,
 					FormatLatency(r.Latency),
-					r.CreditsUsed,
+					formatCostUSD(r.CostUSD),
 					details,
 				))
 			}

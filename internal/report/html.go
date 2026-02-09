@@ -108,28 +108,28 @@ func (g *Generator) GenerateHTML() error {
         </div>
 
         <div class="section">
-            <h2>Cost Efficiency - Total Credits</h2>
+            <h2>Cost Analysis - Total USD Cost</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="costChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Cost Efficiency - USD per Result</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="costPerResultChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Cost Metrics Comparison (Legacy Credits)</h2>
             <div class="chart-container">
                 <div class="chart-wrapper">
                     <canvas id="creditsChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Cost Efficiency - Credits per Result</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper">
-                    <canvas id="creditsPerResultChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Content Efficiency - Characters per Credit</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper">
-                    <canvas id="charsPerCreditChart"></canvas>
                 </div>
             </div>
         </div>
@@ -153,7 +153,7 @@ func (g *Generator) GenerateHTML() error {
                         <th>Provider</th>
                         <th>Status</th>
                         <th>Latency</th>
-                        <th>Credits</th>
+                        <th>Cost (USD)</th>
                         <th>Results/Content</th>
 ` + g.generateQualityTableHeader() + `
                     </tr>
@@ -244,6 +244,16 @@ func (g *Generator) generateTableRows() string {
 		return fmt.Sprintf("%.0fms", float64(d.Milliseconds()))
 	}
 
+	formatCost := func(cost float64) string {
+		if cost == 0 {
+			return "-"
+		}
+		if cost < 0.01 {
+			return fmt.Sprintf("$%.4f", cost)
+		}
+		return fmt.Sprintf("$%.2f", cost)
+	}
+
 	for _, testName := range tests {
 		results := g.collector.GetResultsByTest(testName)
 		for _, r := range results {
@@ -263,6 +273,7 @@ func (g *Generator) generateTableRows() string {
 			}
 
 			providerClass := "provider-" + r.Provider
+			costStr := formatCost(r.CostUSD)
 
 			if showQuality {
 				qualityStr := "-"
@@ -274,21 +285,21 @@ func (g *Generator) generateTableRows() string {
                         <td><span class="provider-badge %s">%s</span></td>
                         <td>%s</td>
                         <td>%s</td>
-                        <td>%d</td>
+                        <td>%s</td>
                         <td>%s</td>
                         <td>%s</td>
                     </tr>
-`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), r.CreditsUsed, details, qualityStr)
+`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), costStr, details, qualityStr)
 			} else {
 				rows += fmt.Sprintf(`                    <tr>
                         <td>%s</td>
                         <td><span class="provider-badge %s">%s</span></td>
                         <td>%s</td>
                         <td>%s</td>
-                        <td>%d</td>
+                        <td>%s</td>
                         <td>%s</td>
                     </tr>
-`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), r.CreditsUsed, details)
+`, testName, providerClass, capitalize(r.Provider), status, formatLatency(r.Latency), costStr, details)
 			}
 		}
 	}
@@ -308,6 +319,9 @@ func (g *Generator) generateChartScripts() string {
 	charsPerCredit := make([]float64, len(providers))
 	resultsPerCredit := make([]float64, len(providers))
 	avgQualityScores := make([]float64, len(providers))
+	// USD cost metrics
+	totalCostUSD := make([]float64, len(providers))
+	costPerResult := make([]float64, len(providers))
 
 	baseColors := []string{"'#ff6b35'", "'#3498db'", "'#27ae60'", "'#9b59b6'", "'#e74c3c'", "'#f39c12'", "'#1abc9c'"}
 	colors := make([]string, len(providers))
@@ -330,6 +344,9 @@ func (g *Generator) generateChartScripts() string {
 		charsPerCredit[i] = summary.CharsPerCredit
 		resultsPerCredit[i] = summary.ResultsPerCredit
 		avgQualityScores[i] = summary.AvgQualityScore
+		// USD cost metrics
+		totalCostUSD[i] = summary.TotalCostUSD
+		costPerResult[i] = summary.CostPerResult
 	}
 
 	qualityChartScript := ""
@@ -446,7 +463,73 @@ func (g *Generator) generateChartScripts() string {
             }
         });
 
-        // Efficiency: Credits per Result (lower is better)
+        // USD Cost Chart - Total Cost
+        new Chart(document.getElementById('costChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [{
+                    label: 'Total USD Cost',
+                    data: [%s],
+                    backgroundColor: [%s],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'Total API Cost in USD (lower is better)' }
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        title: { display: true, text: 'USD ($)' },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(4);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // USD Cost per Result Chart
+        new Chart(document.getElementById('costPerResultChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [{
+                    label: 'USD per Result',
+                    data: [%s],
+                    backgroundColor: [%s],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'Cost Efficiency: USD per Result (lower is better)' }
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        title: { display: true, text: 'USD ($)' },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toFixed(4);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Efficiency: Credits per Result (lower is better) - Legacy
         new Chart(document.getElementById('creditsPerResultChart'), {
             type: 'bar',
             data: {
@@ -463,43 +546,19 @@ func (g *Generator) generateChartScripts() string {
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    title: { display: true, text: 'Cost Efficiency: Credits per Result (lower is better)' }
+                    title: { display: true, text: 'Legacy: Credits per Result (lower is better)' }
                 },
                 scales: {
                     y: { beginAtZero: true, title: { display: true, text: 'Credits' } }
                 }
             }
         });
-
-        // Efficiency: Content per Credit (higher is better)
-        new Chart(document.getElementById('charsPerCreditChart'), {
-            type: 'bar',
-            data: {
-                labels: [%s],
-                datasets: [{
-                    label: 'Characters per Credit',
-                    data: [%s],
-                    backgroundColor: [%s],
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    title: { display: true, text: 'Content Efficiency: Characters per Credit (higher is better)' }
-                },
-                scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Characters' } }
-                }
-            }
-        });
 `, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
 		joinStrings(providerNames), formatIntSlice(totalCredits), joinStrings(colors),
 		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(creditsPerResult), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(charsPerCredit), joinStrings(colors))
+		joinStrings(providerNames), formatFloatSlice(totalCostUSD), joinStrings(colors),
+		joinStrings(providerNames), formatFloatSlice(costPerResult), joinStrings(colors),
+		joinStrings(providerNames), formatFloatSlice(creditsPerResult), joinStrings(colors))
 }
 
 func joinStrings(strs []string) string {

@@ -154,9 +154,9 @@ func TestGenerateMarkdown_ComparisonMath(t *testing.T) {
 	if !strings.Contains(string(content), "faster") {
 		t.Error("report should contain speed comparison")
 	}
-	// Check for cost comparison
-	if !strings.Contains(string(content), "credits") {
-		t.Error("report should contain credit comparison")
+	// Check for cost comparison (USD)
+	if !strings.Contains(string(content), "cost") && !strings.Contains(string(content), "USD") {
+		t.Error("report should contain cost comparison")
 	}
 }
 
