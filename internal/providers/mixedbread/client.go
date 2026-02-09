@@ -40,9 +40,13 @@ type Client struct {
 
 // NewClient creates a new Mixedbread AI client
 func NewClient() (*Client, error) {
-	apiKey := os.Getenv("MIXEDBREAD_API_KEY")
+	// Support both MXB_API_KEY (short form) and MIXEDBREAD_API_KEY (verbose form)
+	apiKey := os.Getenv("MXB_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("MIXEDBREAD_API_KEY environment variable not set")
+		apiKey = os.Getenv("MIXEDBREAD_API_KEY")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("MXB_API_KEY (or MIXEDBREAD_API_KEY) environment variable not set")
 	}
 
 	return &Client{

@@ -232,6 +232,8 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	// Some Tavily endpoints require Authorization header in addition to api_key in body
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
