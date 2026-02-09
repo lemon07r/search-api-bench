@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +35,7 @@ type Client struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	retryCfg   providers.RetryConfig
 }
 
 // NewClient creates a new Mixedbread AI client
@@ -55,6 +55,7 @@ func NewClient() (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		retryCfg: providers.DefaultRetryConfig(),
 	}, nil
 }
 
@@ -100,25 +101,9 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Search-API-Bench/1.0")
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// If search endpoint fails, fallback to using reranking with web results
-	// This is a reasonable fallback since Mixedbread's strength is reranking
-	if resp.StatusCode != http.StatusOK {
-		// For now, return a meaningful error
-		// In production, we could implement a web search + rerank pattern
-		return nil, fmt.Errorf("search endpoint returned status %d: %s (Mixedbread Search API may require different configuration)", resp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	var result searchResponse
@@ -172,21 +157,9 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
-	resp, err := c.httpClient.Do(req)
+	respBody, err := c.retryCfg.DoHTTPRequest(ctx, c.httpClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, err
 	}
 
 	// Convert HTML to markdown
@@ -207,7 +180,6 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 
 	metadata := map[string]interface{}{}
 	if opts.IncludeMetadata {
-		metadata["contentType"] = resp.Header.Get("Content-Type")
 		metadata["source"] = "direct-fetch"
 	}
 

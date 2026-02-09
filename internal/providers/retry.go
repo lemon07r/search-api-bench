@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -199,4 +201,77 @@ func SleepWithContext(ctx context.Context, duration time.Duration) error {
 	case <-time.After(duration):
 		return nil
 	}
+}
+
+// DoHTTPRequest executes an HTTP request with retry logic
+// Returns the response body and error (if any)
+func (rc *RetryConfig) DoHTTPRequest(ctx context.Context, client *http.Client, req *http.Request) ([]byte, error) {
+	var body []byte
+	var lastErr error
+
+	for attempt := 0; attempt <= rc.MaxRetries; attempt++ {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+		default:
+		}
+
+		// Clone request for retry (since body can only be read once)
+		reqClone := req.Clone(ctx)
+		if req.Body != nil {
+			// Read and restore body for retries
+			bodyData, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read request body: %w", err)
+			}
+			req.Body = io.NopCloser(bytes.NewReader(bodyData))
+			reqClone.Body = io.NopCloser(bytes.NewReader(bodyData))
+		}
+
+		resp, err := client.Do(reqClone)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed: %w", err)
+			if attempt == rc.MaxRetries {
+				break
+			}
+			if !rc.isRetryable(lastErr) {
+				return nil, lastErr
+			}
+			backoff := rc.CalculateBackoff(attempt)
+			if err := SleepWithContext(ctx, backoff); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		body, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
+
+		// Check for retryable status codes
+		if rc.RetryableError(nil, resp.StatusCode) {
+			lastErr = fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+			if attempt == rc.MaxRetries {
+				break
+			}
+			backoff := rc.CalculateBackoff(attempt)
+			if err := SleepWithContext(ctx, backoff); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		// Non-retryable error status
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		}
+
+		// Success
+		return body, nil
+	}
+
+	return nil, fmt.Errorf("max retries (%d) exceeded: %w", rc.MaxRetries, lastErr)
 }
