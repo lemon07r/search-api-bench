@@ -85,7 +85,7 @@ func TestRun_SingleProviderSingleTest(t *testing.T) {
 	}
 
 	mock := &mockProvider{name: "mock"}
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 
 	err := runner.Run(context.Background())
 	if err != nil {
@@ -116,7 +116,7 @@ func TestRun_MultipleProviders(t *testing.T) {
 
 	mock1 := &mockProvider{name: "provider1"}
 	mock2 := &mockProvider{name: "provider2"}
-	runner := NewRunner(cfg, []providers.Provider{mock1, mock2}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock1, mock2}, nil, nil, nil)
 
 	err := runner.Run(context.Background())
 	if err != nil {
@@ -151,7 +151,7 @@ func TestRun_MultipleTests(t *testing.T) {
 	}
 
 	mock := &mockProvider{name: "mock"}
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 
 	err := runner.Run(context.Background())
 	if err != nil {
@@ -183,7 +183,7 @@ func TestRun_MatrixExecution(t *testing.T) {
 
 	mock1 := &mockProvider{name: "provider1"}
 	mock2 := &mockProvider{name: "provider2"}
-	runner := NewRunner(cfg, []providers.Provider{mock1, mock2}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock1, mock2}, nil, nil, nil)
 
 	err := runner.Run(context.Background())
 	if err != nil {
@@ -239,7 +239,7 @@ func TestRun_RespectsConcurrencyLimit(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	if maxConcurrent > int32(concurrency) {
@@ -272,7 +272,7 @@ func TestRun_SearchTest(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -315,7 +315,7 @@ func TestRun_ExtractTest(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -356,7 +356,7 @@ func TestRun_CrawlTest(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -396,7 +396,7 @@ func TestRun_TestTimeout(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -431,7 +431,7 @@ func TestRun_ProviderError(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -470,7 +470,7 @@ func TestRun_PartialFailure(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -517,7 +517,7 @@ func TestRun_SearchResultMetrics(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil)
 	runner.Run(context.Background())
 
 	results := runner.GetCollector().GetResults()
@@ -553,7 +553,7 @@ func TestEnsureOutputDir_Creates(t *testing.T) {
 		Tests: []config.TestConfig{},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{}, nil, nil, nil)
 	err := runner.EnsureOutputDir()
 	if err != nil {
 		t.Fatalf("EnsureOutputDir failed: %v", err)
@@ -581,7 +581,7 @@ func TestEnsureOutputDir_Exists(t *testing.T) {
 		Tests: []config.TestConfig{},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{}, nil, nil, nil)
 	err := runner.EnsureOutputDir()
 	if err != nil {
 		t.Fatalf("EnsureOutputDir failed on existing directory: %v", err)
@@ -616,7 +616,7 @@ func TestRun_RaceStress(t *testing.T) {
 			mock2 := &mockProvider{name: "provider2"}
 			mock3 := &mockProvider{name: "provider3"}
 
-			runner := NewRunner(cfg, []providers.Provider{mock1, mock2, mock3}, nil, nil)
+			runner := NewRunner(cfg, []providers.Provider{mock1, mock2, mock3}, nil, nil, nil)
 
 			err := runner.Run(context.Background())
 			if err != nil {
@@ -673,7 +673,7 @@ func TestRun_CollectorThreadSafety(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner(cfg, []providers.Provider{slowMock}, nil, nil)
+	runner := NewRunner(cfg, []providers.Provider{slowMock}, nil, nil, nil)
 
 	// Run and concurrently read from collector
 	var wg sync.WaitGroup
