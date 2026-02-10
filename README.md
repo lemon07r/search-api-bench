@@ -52,9 +52,28 @@ FIRECRAWL_API_KEY=your_key
 TAVILY_API_KEY=your_key
 BRAVE_API_KEY=your_key
 EXA_API_KEY=your_key
-JINA_API_KEY=your_key                # Optional: Jina works without key (lower limits)
+JINA_API_KEY=your_key                # Recommended: Jina search may require auth
 MXB_API_KEY=your_key                 # Preferred for Mixedbread
 # MIXEDBREAD_API_KEY=your_key        # Also supported
+
+# Optional Jina tuning (cost/reliability tradeoffs)
+# Defaults are cost-safe:
+# - search no-content mode enabled
+# - search max results: 3
+# - search retries: 0
+# - extract/crawl retries: 0
+# - extract token budget: 6000
+# - crawl token budget: 4000
+# - search timeout: 12s
+# - generated image captions disabled
+JINA_SEARCH_NO_CONTENT=true
+JINA_SEARCH_MAX_RESULTS=3
+JINA_SEARCH_TIMEOUT=12s
+JINA_SEARCH_MAX_RETRIES=0
+JINA_EXTRACT_MAX_RETRIES=0
+JINA_EXTRACT_TOKEN_BUDGET=6000
+JINA_CRAWL_TOKEN_BUDGET=4000
+JINA_WITH_GENERATED_ALT=false
 
 # Optional scoring diagnostics
 EMBEDDING_MODEL_BASE_URL=https://api.provider.com/v1
@@ -110,7 +129,7 @@ Notes:
 | Tavily | yes | yes | yes | `TAVILY_API_KEY` | Native API for all 3 ops |
 | Brave | yes | yes | yes | `BRAVE_API_KEY` | Extract/Crawl use direct fetch strategy |
 | Exa | yes | yes | yes | `EXA_API_KEY` | Native search + fetch-based flows |
-| Jina | yes | yes | yes | `JINA_API_KEY` (optional) | Works without key, usually lower limits |
+| Jina | yes | yes | yes | `JINA_API_KEY` (recommended) | Search may require auth; defaults are cost-safe |
 | Mixedbread | yes | yes | yes | `MXB_API_KEY` or `MIXEDBREAD_API_KEY` | Supports both key names |
 | Local | no | yes | yes | none | `search` unsupported by design |
 
