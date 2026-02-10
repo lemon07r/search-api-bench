@@ -3,7 +3,7 @@
 //
 // Jina AI offers two main endpoints:
 // - Reader API (r.jina.ai): Converts URLs to LLM-friendly markdown
-// - Search API (s.jina.ai): Searches web and returns top 5 results with content
+// - Search API (s.jina.ai): Searches web and returns web results in LLM-friendly formats
 //
 // API Documentation: https://jina.ai/reader/
 package jina
@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,25 +28,34 @@ import (
 const (
 	readerBaseURL  = "https://r.jina.ai"
 	searchBaseURL  = "https://s.jina.ai"
-	apiBaseURL     = "https://api.jina.ai"
 	defaultTimeout = 30 * time.Second
 	// defaultSearchTimeout bounds each individual search attempt.
-	// Jina search can legitimately take >12s for some queries.
-	defaultSearchTimeout = 18 * time.Second
-	// MaxExtractCredits caps the credits for extract to prevent inflated numbers
-	// Jina bills by tokens (chars/4), but we cap at 100 for fair comparison
-	MaxExtractCredits = 100
-	// BaseSearchCredits is the base cost per search request
-	BaseSearchCredits = 1000
+	// Kept lower to reduce spend on slow responses by default.
+	defaultSearchTimeout = 12 * time.Second
+
+	defaultSearchMaxResults      = 3
+	defaultSearchMaxRetries      = 0
+	defaultExtractMaxRetries     = 0
+	defaultExtractTokenBudget    = 6000
+	defaultCrawlTokenBudget      = 4000
+	defaultSearchNoContent       = true
+	defaultEnableImageCaptioning = false
 )
 
 // Client represents a Jina AI API client
 type Client struct {
-	apiKey          string
-	httpClient      *http.Client
-	searchRetryCfg  providers.RetryConfig
-	extractRetryCfg providers.RetryConfig
-	searchTimeout   time.Duration
+	apiKey           string
+	httpClient       *http.Client
+	readerBaseURL    string
+	searchBaseURL    string
+	searchRetryCfg   providers.RetryConfig
+	extractRetryCfg  providers.RetryConfig
+	searchTimeout    time.Duration
+	searchMaxResult  int
+	searchNoContent  bool
+	extractBudget    int
+	crawlBudget      int
+	withGeneratedAlt bool
 }
 
 // NewClient creates a new Jina AI client
@@ -68,9 +78,17 @@ func NewClient() (*Client, error) {
 		}
 	}
 
+	searchMaxRetries := parseNonNegativeIntEnv("JINA_SEARCH_MAX_RETRIES", defaultSearchMaxRetries)
+	extractMaxRetries := parseNonNegativeIntEnv("JINA_EXTRACT_MAX_RETRIES", defaultExtractMaxRetries)
+	searchMaxResults := parsePositiveIntEnv("JINA_SEARCH_MAX_RESULTS", defaultSearchMaxResults)
+	extractBudget := parsePositiveIntEnv("JINA_EXTRACT_TOKEN_BUDGET", defaultExtractTokenBudget)
+	crawlBudget := parsePositiveIntEnv("JINA_CRAWL_TOKEN_BUDGET", defaultCrawlTokenBudget)
+	searchNoContent := parseBoolEnv("JINA_SEARCH_NO_CONTENT", defaultSearchNoContent)
+	withGeneratedAlt := parseBoolEnv("JINA_WITH_GENERATED_ALT", defaultEnableImageCaptioning)
+
 	// Search uses balanced retry policy to improve reliability without excessive cost.
 	searchRetryCfg := providers.RetryConfig{
-		MaxRetries:     2,
+		MaxRetries:     searchMaxRetries,
 		InitialBackoff: 500 * time.Millisecond,
 		MaxBackoff:     8 * time.Second,
 		BackoffFactor:  2.0,
@@ -85,7 +103,7 @@ func NewClient() (*Client, error) {
 
 	// Extract/crawl keep conservative retries to limit token usage.
 	extractRetryCfg := providers.RetryConfig{
-		MaxRetries:     1, // Reduce from 3 to 1 to limit credit usage on failures
+		MaxRetries:     extractMaxRetries,
 		InitialBackoff: 500 * time.Millisecond,
 		MaxBackoff:     5 * time.Second,
 		BackoffFactor:  2.0,
@@ -100,9 +118,16 @@ func NewClient() (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
-		searchRetryCfg:  searchRetryCfg,
-		extractRetryCfg: extractRetryCfg,
-		searchTimeout:   searchTimeout,
+		readerBaseURL:    readerBaseURL,
+		searchBaseURL:    searchBaseURL,
+		searchRetryCfg:   searchRetryCfg,
+		extractRetryCfg:  extractRetryCfg,
+		searchTimeout:    searchTimeout,
+		searchMaxResult:  searchMaxResults,
+		searchNoContent:  searchNoContent,
+		extractBudget:    extractBudget,
+		crawlBudget:      crawlBudget,
+		withGeneratedAlt: withGeneratedAlt,
 	}, nil
 }
 
@@ -121,15 +146,18 @@ func (c *Client) SupportsOperation(opType string) bool {
 	}
 }
 
-// Search performs a web search using Jina AI Search API
+// Search performs a web search using Jina AI Search API.
 // Endpoint: GET https://s.jina.ai/?q={query}
-// Returns top 5 results with full content in LLM-friendly format
+// Default mode uses X-Respond-With:no-content for lower token spend.
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	searchStart := time.Now()
 
-	// Limit max results to prevent timeouts - Jina Search API can be slow with many results
-	if opts.MaxResults > 3 {
-		opts.MaxResults = 3
+	// Limit max results to control cost/latency.
+	if opts.MaxResults <= 0 {
+		opts.MaxResults = c.searchMaxResult
+	}
+	if opts.MaxResults > c.searchMaxResult {
+		opts.MaxResults = c.searchMaxResult
 	}
 
 	var result *providers.SearchResult
@@ -165,16 +193,19 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	}
 	defer cancel()
 
-	// Build search URL with query parameter
-	searchURL := fmt.Sprintf("%s/?q=%s", searchBaseURL, url.QueryEscape(query))
-
-	// Add JSON format for structured response
-	searchURL += "&format=json"
+	// Build search URL with query parameter.
+	searchURL := fmt.Sprintf("%s/?q=%s", c.searchBaseURL, url.QueryEscape(query))
 
 	// Prepare headers
 	headers := make(map[string]string)
 	if c.apiKey != "" {
 		headers["Authorization"] = "Bearer " + c.apiKey
+	}
+	if c.searchNoContent {
+		headers["X-Respond-With"] = "no-content"
+	}
+	if !c.withGeneratedAlt {
+		headers["X-Retain-Images"] = "none"
 	}
 
 	// Log the request
@@ -191,6 +222,12 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	// Add authorization if API key is available
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	if c.searchNoContent {
+		req.Header.Set("X-Respond-With", "no-content")
+	}
+	if !c.withGeneratedAlt {
+		req.Header.Set("X-Retain-Images", "none")
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -282,11 +319,10 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 		totalContentLen += len(r.Title) + len(r.Content)
 	}
 
-	// Jina Search bills by tokens (~4 chars per token) + base request cost
-	// Use actual content length for more accurate credit estimation
-	creditsUsed := BaseSearchCredits + (totalContentLen / 4)
-	if creditsUsed > 10000 {
-		creditsUsed = 10000 // Cap at 10k to match Jina's typical max
+	// Jina bills by processed tokens; when usage isn't returned, estimate from body length.
+	creditsUsed := tokenEstimateFromBytes(respBody)
+	if creditsUsed == 0 {
+		creditsUsed = tokenEstimateFromChars(totalContentLen)
 	}
 
 	return &providers.SearchResult{
@@ -303,11 +339,15 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 // Endpoint: GET https://r.jina.ai/http://{url}
 // Converts any URL to clean, LLM-friendly markdown
 func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
+	return c.executeExtractWithRetry(ctx, pageURL, opts, c.extractBudget)
+}
+
+func (c *Client) executeExtractWithRetry(ctx context.Context, pageURL string, opts providers.ExtractOptions, tokenBudget int) (*providers.ExtractResult, error) {
 	var result *providers.ExtractResult
 	var extractErr error
 
 	err := c.extractRetryCfg.DoWithRetry(ctx, func() error {
-		result, extractErr = c.extractInternal(ctx, pageURL, opts)
+		result, extractErr = c.extractInternal(ctx, pageURL, opts, tokenBudget)
 		return extractErr
 	})
 
@@ -318,7 +358,7 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 }
 
 // extractInternal performs the actual extract request
-func (c *Client) extractInternal(ctx context.Context, pageURL string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
+func (c *Client) extractInternal(ctx context.Context, pageURL string, _ providers.ExtractOptions, tokenBudget int) (*providers.ExtractResult, error) {
 	start := time.Now()
 
 	// Ensure URL has scheme
@@ -328,17 +368,18 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 
 	// Build reader URL - Jina expects the full URL appended after the base
 	// Example: https://r.jina.ai/https://docs.python.org/3/tutorial/
-	readerURL := readerBaseURL + "/" + pageURL
-
-	// Add JSON format if metadata is requested
-	if opts.IncludeMetadata {
-		readerURL += "?format=json"
-	}
+	readerURL := c.readerBaseURL + "/" + pageURL
 
 	// Prepare headers
 	headers := make(map[string]string)
 	if c.apiKey != "" {
 		headers["Authorization"] = "Bearer " + c.apiKey
+	}
+	if tokenBudget > 0 {
+		headers["X-Token-Budget"] = fmt.Sprintf("%d", tokenBudget)
+	}
+	if !c.withGeneratedAlt {
+		headers["X-Retain-Images"] = "none"
 	}
 
 	// Log the request
@@ -355,6 +396,12 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 	// Add authorization if API key is available
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	if tokenBudget > 0 {
+		req.Header.Set("X-Token-Budget", fmt.Sprintf("%d", tokenBudget))
+	}
+	if !c.withGeneratedAlt {
+		req.Header.Set("X-Retain-Images", "none")
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -400,53 +447,35 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, opts provi
 	var content, title string
 	var metadata map[string]interface{}
 
-	if opts.IncludeMetadata {
-		// Check if response is actually JSON
-		contentType := resp.Header.Get("Content-Type")
-		if !isJSONContent(contentType) {
-			// Handle plain text response (likely rate limit message)
-			textResp := strings.TrimSpace(string(respBody))
-			if isRateLimitError(textResp) {
-				return nil, fmt.Errorf("rate limit exceeded: %s", textResp)
+	// Check if response is actually JSON
+	contentType := resp.Header.Get("Content-Type")
+	if isJSONContent(contentType) {
+		var result readerResponse
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			// Check if body is plain text error
+			textBody := strings.TrimSpace(string(respBody))
+			if isRateLimitError(textBody) {
+				providers.LogError(ctx, textBody, "rate_limit", "extract parse response")
+				return nil, fmt.Errorf("rate limit exceeded: %s", textBody)
 			}
-			// Use plain text as content
-			content = textResp
-			title = extractTitleFromMarkdown(content)
-			metadata = map[string]interface{}{}
-		} else {
-			var result readerResponse
-			if err := json.Unmarshal(respBody, &result); err != nil {
-				// Check if body is plain text error
-				textBody := strings.TrimSpace(string(respBody))
-				if isRateLimitError(textBody) {
-					providers.LogError(ctx, textBody, "rate_limit", "extract parse response")
-					return nil, fmt.Errorf("rate limit exceeded: %s", textBody)
-				}
-				providers.LogError(ctx, err.Error(), "parse", "extract unmarshal failed")
-				return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
-			}
-			content = result.Content
-			title = result.Title
-			metadata = map[string]interface{}{
-				"url":       result.URL,
-				"timestamp": result.Timestamp,
-			}
+			providers.LogError(ctx, err.Error(), "parse", "extract unmarshal failed")
+			return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
+		}
+		content = result.Content
+		title = result.Title
+		metadata = map[string]interface{}{
+			"url":       result.URL,
+			"timestamp": result.Timestamp,
 		}
 	} else {
 		// Plain text response
 		content = string(respBody)
-		// Try to extract title from first line if it's markdown
-		title = extractTitleFromMarkdown(content)
-		metadata = map[string]interface{}{}
+		title = extractTitle(content)
+		metadata = extractMetadata(content)
 	}
 
-	// Credits based on output token count (approximate)
-	// Jina bills by tokens where 1 token ≈ 4 characters
-	// We cap at MaxExtractCredits for fair comparison with other providers
-	creditsUsed := len(content) / 4 // Rough token estimation
-	if creditsUsed > MaxExtractCredits {
-		creditsUsed = MaxExtractCredits
-	}
+	// Credits based on output token count (approximate).
+	creditsUsed := tokenEstimateFromString(content)
 
 	return &providers.ExtractResult{
 		URL:         pageURL,
@@ -473,7 +502,7 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 // crawlSinglePage is a fallback that just extracts the starting URL
 func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ providers.CrawlOptions, startTime time.Time) (*providers.CrawlResult, error) {
 	extractOpts := providers.DefaultExtractOptions()
-	extractResult, err := c.Extract(ctx, pageURL, extractOpts)
+	extractResult, err := c.executeExtractWithRetry(ctx, pageURL, extractOpts, c.crawlBudget)
 	if err != nil {
 		return nil, fmt.Errorf("crawl failed: %w", err)
 	}
@@ -502,6 +531,96 @@ func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ provider
 
 func hasScheme(s string) bool {
 	return len(s) > 7 && (s[:7] == "http://" || s[:8] == "https://")
+}
+
+func parseBoolEnv(name string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+func parsePositiveIntEnv(name string, defaultValue int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return defaultValue
+	}
+	return v
+}
+
+func parseNonNegativeIntEnv(name string, defaultValue int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return defaultValue
+	}
+	return v
+}
+
+func tokenEstimateFromString(text string) int {
+	return tokenEstimateFromChars(len(text))
+}
+
+func tokenEstimateFromBytes(body []byte) int {
+	return tokenEstimateFromChars(len(body))
+}
+
+func tokenEstimateFromChars(chars int) int {
+	if chars <= 0 {
+		return 0
+	}
+	tokens := chars / 4
+	if tokens == 0 {
+		return 1
+	}
+	return tokens
+}
+
+func extractTitle(content string) string {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(line), "title:") {
+			return strings.TrimSpace(line[len("title:"):])
+		}
+		break
+	}
+	return extractTitleFromMarkdown(content)
+}
+
+func extractMetadata(content string) map[string]interface{} {
+	meta := map[string]interface{}{}
+	for _, line := range strings.Split(content, "\n") {
+		field, value, ok := parseMetadataLine(line)
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(field) {
+		case "url source":
+			meta["url"] = value
+		case "published time", "date":
+			meta["published"] = value
+		}
+	}
+	return meta
 }
 
 // logRequest logs an HTTP request via the debug logger if available
@@ -645,10 +764,7 @@ func (c *Client) parsePlainTextSearchResponse(query, text string, startTime time
 		}
 	}
 
-	creditsUsed := BaseSearchCredits + (len(text) / 4)
-	if creditsUsed > 10000 {
-		creditsUsed = 10000
-	}
+	creditsUsed := tokenEstimateFromString(text)
 
 	return &providers.SearchResult{
 		Query:        query,
@@ -674,6 +790,19 @@ func parseNumberedMetadataLine(line string) (field, value string, ok bool) {
 		return "", "", false
 	}
 
+	field = strings.TrimSpace(parts[0])
+	value = strings.TrimSpace(parts[1])
+	if field == "" {
+		return "", "", false
+	}
+	return field, value, true
+}
+
+func parseMetadataLine(line string) (field, value string, ok bool) {
+	parts := strings.SplitN(strings.TrimSpace(line), ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
 	field = strings.TrimSpace(parts[0])
 	value = strings.TrimSpace(parts[1])
 	if field == "" {

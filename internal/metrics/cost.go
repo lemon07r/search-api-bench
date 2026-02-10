@@ -53,7 +53,7 @@ func NewCostCalculator() *CostCalculator {
 		exaPerContent: 0.001,
 
 		// Jina: $0.02 per million tokens
-		// Source: https://www.jinaai.cn/reader/
+		// Source: https://jina.ai/pricing/
 		jinaPerToken: 0.02 / 1000000,
 
 		// Mixedbread: $4 per 1K queries = $0.004 per query
@@ -121,8 +121,7 @@ func (cc *CostCalculator) CalculateExaCost(creditsUsed int, _ string, isContentF
 
 // CalculateJinaCost computes USD cost for Jina based on tokens used.
 // Jina charges $0.02 per million tokens.
-// Search: 10,000 tokens per request fixed.
-// Extract: tokens based on content length.
+// Search/Extract/Crawl: token usage varies by endpoint mode and output size.
 func (cc *CostCalculator) CalculateJinaCost(tokensUsed int, _ string) float64 {
 	cc.mu.RLock()
 	defer cc.mu.RUnlock()
@@ -201,8 +200,8 @@ func (cc *CostCalculator) GetPricingInfo() map[string]map[string]string {
 		"jina": {
 			"unit":        "token",
 			"rate":        "$0.02 per million",
-			"source":      "https://www.jinaai.cn/reader/",
-			"description": "Search: 10,000 tokens fixed, Extract: tokens based on content",
+			"source":      "https://jina.ai/pricing/",
+			"description": "Token-based billing; usage varies by endpoint mode and output size",
 		},
 		"mixedbread": {
 			"unit":        "query",
