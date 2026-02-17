@@ -33,7 +33,7 @@ const (
 	// Kept lower to reduce spend on slow responses by default.
 	defaultSearchTimeout = 12 * time.Second
 
-	defaultSearchMaxResults      = 3
+	defaultSearchMaxResults      = 10
 	defaultSearchMaxRetries      = 0
 	defaultExtractMaxRetries     = 0
 	defaultExtractTokenBudget    = 6000
@@ -136,14 +136,18 @@ func (c *Client) Name() string {
 	return "jina"
 }
 
+// Capabilities returns Jina operation support levels.
+func (c *Client) Capabilities() providers.CapabilitySet {
+	return providers.CapabilitySet{
+		Search:  providers.SupportNative,
+		Extract: providers.SupportNative,
+		Crawl:   providers.SupportEmulated,
+	}
+}
+
 // SupportsOperation returns whether Jina supports the given operation type
 func (c *Client) SupportsOperation(opType string) bool {
-	switch opType {
-	case "search", "extract", "crawl":
-		return true
-	default:
-		return false
-	}
+	return c.Capabilities().SupportsOperation(opType)
 }
 
 // Search performs a web search using Jina AI Search API.
@@ -152,19 +156,22 @@ func (c *Client) SupportsOperation(opType string) bool {
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	searchStart := time.Now()
 
-	// Limit max results to control cost/latency.
+	// Use caller max results when provided. Fall back to provider default.
 	if opts.MaxResults <= 0 {
 		opts.MaxResults = c.searchMaxResult
 	}
-	if opts.MaxResults > c.searchMaxResult {
-		opts.MaxResults = c.searchMaxResult
+
+	// Use content-rich mode when caller requests advanced search.
+	noContent := c.searchNoContent
+	if opts.SearchDepth == "advanced" {
+		noContent = false
 	}
 
 	var result *providers.SearchResult
 	var searchErr error
 
 	err := c.searchRetryCfg.DoWithRetry(ctx, func() error {
-		result, searchErr = c.searchInternal(ctx, query, opts)
+		result, searchErr = c.searchInternal(ctx, query, opts, noContent)
 		return searchErr
 	})
 
@@ -184,7 +191,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 }
 
 // searchInternal performs the actual search request
-func (c *Client) searchInternal(ctx context.Context, query string, _ providers.SearchOptions) (*providers.SearchResult, error) {
+func (c *Client) searchInternal(ctx context.Context, query string, opts providers.SearchOptions, noContent bool) (*providers.SearchResult, error) {
 	start := time.Now()
 	reqCtx := ctx
 	cancel := func() {}
@@ -193,15 +200,22 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	}
 	defer cancel()
 
+	topN := opts.MaxResults
+	if topN <= 0 {
+		topN = c.searchMaxResult
+	}
+	if topN <= 0 {
+		topN = defaultSearchMaxResults
+	}
 	// Build search URL with query parameter.
-	searchURL := fmt.Sprintf("%s/?q=%s", c.searchBaseURL, url.QueryEscape(query))
+	searchURL := fmt.Sprintf("%s/?q=%s&top_n=%d", c.searchBaseURL, url.QueryEscape(query), topN)
 
 	// Prepare headers
 	headers := make(map[string]string)
 	if c.apiKey != "" {
 		headers["Authorization"] = "Bearer " + c.apiKey
 	}
-	if c.searchNoContent {
+	if noContent {
 		headers["X-Respond-With"] = "no-content"
 	}
 	if !c.withGeneratedAlt {
@@ -223,7 +237,7 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
-	if c.searchNoContent {
+	if noContent {
 		req.Header.Set("X-Respond-With", "no-content")
 	}
 	if !c.withGeneratedAlt {
@@ -326,12 +340,14 @@ func (c *Client) searchInternal(ctx context.Context, query string, _ providers.S
 	}
 
 	return &providers.SearchResult{
-		Query:        query,
-		Results:      items,
-		TotalResults: len(items),
-		Latency:      latency,
-		CreditsUsed:  creditsUsed,
-		RawResponse:  respBody,
+		Query:         query,
+		Results:       items,
+		TotalResults:  len(items),
+		Latency:       latency,
+		CreditsUsed:   creditsUsed,
+		RequestCount:  1,
+		UsageReported: false,
+		RawResponse:   respBody,
 	}, nil
 }
 
@@ -478,13 +494,15 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 	creditsUsed := tokenEstimateFromString(content)
 
 	return &providers.ExtractResult{
-		URL:         pageURL,
-		Title:       title,
-		Content:     content,
-		Markdown:    content,
-		Metadata:    metadata,
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
+		URL:           pageURL,
+		Title:         title,
+		Content:       content,
+		Markdown:      content,
+		Metadata:      metadata,
+		Latency:       latency,
+		CreditsUsed:   creditsUsed,
+		RequestCount:  1,
+		UsageReported: false,
 	}, nil
 }
 
@@ -519,11 +537,12 @@ func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ provider
 	latency := time.Since(startTime)
 
 	return &providers.CrawlResult{
-		URL:         pageURL,
-		Pages:       pages,
-		TotalPages:  1,
-		Latency:     latency,
-		CreditsUsed: extractResult.CreditsUsed,
+		URL:          pageURL,
+		Pages:        pages,
+		TotalPages:   1,
+		Latency:      latency,
+		CreditsUsed:  extractResult.CreditsUsed,
+		RequestCount: 1,
 	}, nil
 }
 

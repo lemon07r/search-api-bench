@@ -196,13 +196,6 @@ func (s *Scorer) calculateSemanticRelevance(ctx context.Context, query string, r
 		return 50, nil // Neutral score if no embedding client
 	}
 
-	// Use search-optimized instruction for better relevance scoring
-	oldOptions := s.embedding.GetOptions()
-	newOptions := oldOptions
-	newOptions.Instruction = InstructSearch
-	s.embedding.SetOptions(newOptions)
-	defer s.embedding.SetOptions(oldOptions)
-
 	// Prepare texts to embed
 	texts := make([]string, len(results)+1)
 	texts[0] = query
@@ -211,7 +204,7 @@ func (s *Scorer) calculateSemanticRelevance(ctx context.Context, query string, r
 	}
 
 	// Get embeddings
-	embeddings, err := s.embedding.Embed(ctx, texts)
+	embeddings, err := s.embedding.EmbedBatchWithInstruction(ctx, texts, InstructSearch)
 	if err != nil {
 		return 0, err
 	}

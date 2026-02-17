@@ -175,6 +175,48 @@ func TestParseFormats_AllWithOthers(t *testing.T) {
 	}
 }
 
+func TestParseMode(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantErr bool
+	}{
+		{input: "normalized", wantErr: false},
+		{input: "native", wantErr: false},
+		{input: "invalid", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		_, err := parseMode(tc.input)
+		if tc.wantErr && err == nil {
+			t.Fatalf("expected error for mode %q", tc.input)
+		}
+		if !tc.wantErr && err != nil {
+			t.Fatalf("did not expect error for mode %q: %v", tc.input, err)
+		}
+	}
+}
+
+func TestParseCapabilityPolicy(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantErr bool
+	}{
+		{input: "strict", wantErr: false},
+		{input: "tagged", wantErr: false},
+		{input: "invalid", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		_, err := parseCapabilityPolicy(tc.input)
+		if tc.wantErr && err == nil {
+			t.Fatalf("expected error for policy %q", tc.input)
+		}
+		if !tc.wantErr && err != nil {
+			t.Fatalf("did not expect error for policy %q: %v", tc.input, err)
+		}
+	}
+}
+
 func TestLoadEnv_FileNotFound(t *testing.T) {
 	// Ensure .env doesn't exist
 	os.Remove(".env")

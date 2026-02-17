@@ -28,32 +28,38 @@ import (
 )
 
 type cliFlags struct {
-	configPath    *string
-	outputDir     *string
-	providersFlag *string
-	format        *string
-	noProgress    *bool
-	debugMode     *bool
-	debugFullMode *bool
-	quickMode     *bool
-	noSearch      *bool
-	noLocal       *bool
-	qualityMode   *bool
+	configPath       *string
+	outputDir        *string
+	providersFlag    *string
+	format           *string
+	mode             *string
+	repeats          *int
+	capabilityPolicy *string
+	noProgress       *bool
+	debugMode        *bool
+	debugFullMode    *bool
+	quickMode        *bool
+	noSearch         *bool
+	noLocal          *bool
+	qualityMode      *bool
 }
 
 func parseFlags() *cliFlags {
 	return &cliFlags{
-		configPath:    flag.String("config", "config.toml", "Path to configuration file"),
-		outputDir:     flag.String("output", "", "Output directory for reports (overrides config)"),
-		providersFlag: flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local, brave, exa, mixedbread, jina"),
-		format:        flag.String("format", "all", "Report format: all, html, md, json"),
-		noProgress:    flag.Bool("no-progress", false, "Disable progress bar (useful for CI)"),
-		debugMode:     flag.Bool("debug", false, "Enable debug logging with request/response data"),
-		debugFullMode: flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
-		quickMode:     flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
-		noSearch:      flag.Bool("no-search", false, "Exclude search tests"),
-		noLocal:       flag.Bool("no-local", false, "Exclude local provider"),
-		qualityMode:   flag.Bool("quality", false, "Enable relevance/scoring metrics (search model-assisted + extract/crawl heuristics; requires EMBEDDING_* and RERANKER_* env vars)"),
+		configPath:       flag.String("config", "config.toml", "Path to configuration file"),
+		outputDir:        flag.String("output", "", "Output directory for reports (overrides config)"),
+		providersFlag:    flag.String("providers", "all", "Providers to test: all, firecrawl, tavily, local, brave, exa, mixedbread, jina"),
+		format:           flag.String("format", "all", "Report format: all, html, md, json"),
+		mode:             flag.String("mode", string(providers.ModeNormalized), "Benchmark mode: normalized or native"),
+		repeats:          flag.Int("repeats", 3, "How many repeated runs per test/provider"),
+		capabilityPolicy: flag.String("capability-policy", "strict", "Normalized-mode policy for emulated operations: strict or tagged"),
+		noProgress:       flag.Bool("no-progress", false, "Disable progress bar (useful for CI)"),
+		debugMode:        flag.Bool("debug", false, "Enable debug logging with request/response data"),
+		debugFullMode:    flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
+		quickMode:        flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
+		noSearch:         flag.Bool("no-search", false, "Exclude search tests"),
+		noLocal:          flag.Bool("no-local", false, "Exclude local provider"),
+		qualityMode:      flag.Bool("quality", false, "Enable relevance/scoring metrics (search model-assisted + extract/crawl heuristics; requires EMBEDDING_* and RERANKER_* env vars)"),
 	}
 }
 
@@ -168,8 +174,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	mode, err := parseMode(*flags.mode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing mode: %v\n", err)
+		os.Exit(1)
+	}
+
+	capabilityPolicy, err := parseCapabilityPolicy(*flags.capabilityPolicy)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing capability policy: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *flags.repeats <= 0 {
+		fmt.Fprintf(os.Stderr, "Error parsing repeats: repeats must be > 0\n")
+		os.Exit(1)
+	}
+
 	// Calculate total tests
-	totalTests := len(cfg.Tests) * len(provs)
+	totalTests := len(cfg.Tests) * len(provs) * *flags.repeats
 
 	// Get provider names for progress display
 	progressProviderNames := make([]string, 0, len(provs))
@@ -180,8 +203,14 @@ func main() {
 	// Create progress manager
 	prog := progress.NewManager(totalTests, progressProviderNames, !*flags.noProgress)
 
+	runnerOpts := evaluator.RunnerOptions{
+		Mode:             mode,
+		Repeats:          *flags.repeats,
+		CapabilityPolicy: capabilityPolicy,
+	}
+
 	// Create runner with progress manager, debug logger, and optional quality scorer
-	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger, scorer)
+	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger, scorer, runnerOpts)
 
 	// Print initial banner if not using progress bar
 	if *flags.noProgress {
@@ -492,6 +521,26 @@ func parseFormats(s string) ([]string, error) {
 	}
 
 	return formats, nil
+}
+
+func parseMode(s string) (providers.RunMode, error) {
+	mode := providers.RunMode(strings.ToLower(strings.TrimSpace(s)))
+	switch mode {
+	case providers.ModeNormalized, providers.ModeNative:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid mode: %s (valid values: normalized, native)", s)
+	}
+}
+
+func parseCapabilityPolicy(s string) (evaluator.CapabilityPolicy, error) {
+	policy := evaluator.CapabilityPolicy(strings.ToLower(strings.TrimSpace(s)))
+	switch policy {
+	case evaluator.CapabilityPolicyStrict, evaluator.CapabilityPolicyTagged:
+		return policy, nil
+	default:
+		return "", fmt.Errorf("invalid capability policy: %s (valid values: strict, tagged)", s)
+	}
 }
 
 // ensureOutputDir creates a timestamped subdirectory for results

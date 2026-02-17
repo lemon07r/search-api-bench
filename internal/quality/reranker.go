@@ -71,6 +71,7 @@ type RerankerClient struct {
 	model      string
 	httpClient *http.Client
 	options    RerankerOptions
+	mu         sync.RWMutex
 }
 
 // RerankResult represents a single reranked document
@@ -136,16 +137,22 @@ func NewRerankerClientWithOptions(baseURL, apiKey, model string, options Reranke
 
 // SetOptions updates the reranker options
 func (c *RerankerClient) SetOptions(options RerankerOptions) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.options = options
 }
 
 // GetOptions returns current reranker options
 func (c *RerankerClient) GetOptions() RerankerOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.options
 }
 
 // SetModel changes the reranker model
 func (c *RerankerClient) SetModel(model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.model = model
 }
 
@@ -154,8 +161,12 @@ func (c *RerankerClient) Rerank(ctx context.Context, query string, documents []s
 	if len(documents) == 0 {
 		return []RerankResult{}, nil
 	}
+	c.mu.RLock()
+	model := c.model
+	options := c.options
+	c.mu.RUnlock()
 
-	payload := c.buildRequestPayload(query, documents, len(documents))
+	payload := c.buildRequestPayload(model, options, query, documents, len(documents))
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -224,23 +235,23 @@ func (c *RerankerClient) Rerank(ctx context.Context, query string, documents []s
 }
 
 // buildRequestPayload creates the API request payload with instruction support
-func (c *RerankerClient) buildRequestPayload(query string, documents []string, topN int) map[string]interface{} {
+func (c *RerankerClient) buildRequestPayload(model string, options RerankerOptions, query string, documents []string, topN int) map[string]interface{} {
 	payload := map[string]interface{}{
-		"model":            c.model,
+		"model":            model,
 		"query":            query,
 		"documents":        documents,
 		"top_n":            topN,
-		"return_documents": c.options.ReturnDocuments,
+		"return_documents": options.ReturnDocuments,
 	}
 
 	// Add instruction if provided (Qwen3 is instruction-aware)
-	if c.options.Instruction != "" {
-		payload["instruction"] = c.options.Instruction
+	if options.Instruction != "" {
+		payload["instruction"] = options.Instruction
 	}
 
 	// Add max tokens per document if specified
-	if c.options.MaxTokensPerDoc > 0 {
-		payload["max_tokens_per_doc"] = c.options.MaxTokensPerDoc
+	if options.MaxTokensPerDoc > 0 {
+		payload["max_tokens_per_doc"] = options.MaxTokensPerDoc
 	}
 
 	return payload
@@ -248,10 +259,6 @@ func (c *RerankerClient) buildRequestPayload(query string, documents []string, t
 
 // RerankWithOptions reranks with specific options for this request only
 func (c *RerankerClient) RerankWithOptions(ctx context.Context, query string, documents []string, options RerankerOptions, topN int) ([]RerankResult, error) {
-	oldOptions := c.options
-	c.options = options
-	defer func() { c.options = oldOptions }()
-
 	if topN <= 0 {
 		topN = len(documents)
 	}
@@ -261,7 +268,11 @@ func (c *RerankerClient) RerankWithOptions(ctx context.Context, query string, do
 	if topN < n {
 		n = topN
 	}
-	return c.Rerank(ctx, query, documents[:n])
+	c.mu.RLock()
+	model := c.model
+	c.mu.RUnlock()
+	payload := c.buildRequestPayload(model, options, query, documents[:n], n)
+	return c.rerankWithPayload(ctx, payload)
 }
 
 // RerankWithLimit returns top N documents after reranking
@@ -275,6 +286,73 @@ func (c *RerankerClient) RerankWithLimit(ctx context.Context, query string, docu
 		return results[:topN], nil
 	}
 	return results, nil
+}
+
+func (c *RerankerClient) rerankWithPayload(ctx context.Context, payload map[string]interface{}) ([]RerankResult, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	var result RerankResponse
+	var lastErr error
+
+	for attempt := 0; attempt < rerankerMaxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 1s, 2s, 4s
+			delay := time.Duration(1<<(attempt-1)) * rerankerRetryDelay
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/rerank", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, rerankerMaxRetries, err)
+			continue // Retry on network errors
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response (attempt %d/%d): %w", attempt+1, rerankerMaxRetries, err)
+			continue
+		}
+
+		if isRetryableQualityStatus(resp.StatusCode, string(respBody)) {
+			// Retry on known transient failures.
+			lastErr = fmt.Errorf("API returned status %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, rerankerMaxRetries, string(respBody))
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+
+		// Success - break out of retry loop
+		lastErr = nil
+		break
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+
+	return result.Results, nil
 }
 
 // BatchRerank performs reranking for multiple queries in parallel
@@ -296,13 +374,18 @@ func (c *RerankerClient) BatchRerank(ctx context.Context, requests []BatchRerank
 
 // tryBatchEndpoint attempts to use the batch rerank endpoint
 func (c *RerankerClient) tryBatchEndpoint(ctx context.Context, requests []BatchRerankRequest) ([]BatchRerankResult, error) {
+	c.mu.RLock()
+	model := c.model
+	options := c.options
+	c.mu.RUnlock()
+
 	payload := map[string]interface{}{
-		"model":    c.model,
+		"model":    model,
 		"requests": requests,
 	}
 
-	if c.options.Instruction != "" {
-		payload["instruction"] = c.options.Instruction
+	if options.Instruction != "" {
+		payload["instruction"] = options.Instruction
 	}
 
 	body, err := json.Marshal(payload)

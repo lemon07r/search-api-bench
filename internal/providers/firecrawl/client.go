@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
@@ -50,14 +48,18 @@ func (c *Client) Name() string {
 	return "firecrawl"
 }
 
+// Capabilities returns Firecrawl operation support levels.
+func (c *Client) Capabilities() providers.CapabilitySet {
+	return providers.CapabilitySet{
+		Search:  providers.SupportNative,
+		Extract: providers.SupportNative,
+		Crawl:   providers.SupportNative,
+	}
+}
+
 // SupportsOperation returns whether Firecrawl supports the given operation type
 func (c *Client) SupportsOperation(opType string) bool {
-	switch opType {
-	case "search", "extract", "crawl":
-		return true
-	default:
-		return false
-	}
+	return c.Capabilities().SupportsOperation(opType)
 }
 
 // Search performs a web search using Firecrawl
@@ -127,6 +129,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  1, // Firecrawl search uses 1 credit per request
+		RequestCount: 1,
 		RawResponse:  resp.Body,
 	}, nil
 }
@@ -181,13 +184,14 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	return &providers.ExtractResult{
-		URL:         url,
-		Title:       result.Data.Metadata.Title,
-		Content:     result.Data.Markdown,
-		Markdown:    result.Data.Markdown,
-		Metadata:    result.Data.Metadata.Raw,
-		Latency:     latency,
-		CreditsUsed: 1, // Firecrawl scrape uses 1 credit
+		URL:          url,
+		Title:        result.Data.Metadata.Title,
+		Content:      result.Data.Markdown,
+		Markdown:     result.Data.Markdown,
+		Metadata:     result.Data.Metadata.Raw,
+		Latency:      latency,
+		CreditsUsed:  1, // Firecrawl scrape uses 1 credit
+		RequestCount: 1,
 	}, nil
 }
 
@@ -261,48 +265,28 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}
 
 	return &providers.CrawlResult{
-		URL:         url,
-		Pages:       pages,
-		TotalPages:  len(pages),
-		Latency:     latency,
-		CreditsUsed: len(pages), // Each page costs 1 credit
+		URL:           url,
+		Pages:         pages,
+		TotalPages:    len(pages),
+		Latency:       latency,
+		CreditsUsed:   len(pages), // Each page costs 1 credit
+		RequestCount:  1,
+		UsageReported: true,
 	}, nil
 }
 
-func normalizeCrawlOptions(seedURL string, opts providers.CrawlOptions) (maxPages int, maxDepth int) {
+func normalizeCrawlOptions(_ string, opts providers.CrawlOptions) (maxPages int, maxDepth int) {
 	maxPages = opts.MaxPages
 	if maxPages <= 0 {
 		maxPages = 1
 	}
 
 	maxDepth = opts.MaxDepth
-	requiredDepth := minDepthForSeedURL(seedURL)
-	if maxDepth < requiredDepth {
-		maxDepth = requiredDepth
+	if maxDepth < 0 {
+		maxDepth = 0
 	}
 
 	return maxPages, maxDepth
-}
-
-func minDepthForSeedURL(seedURL string) int {
-	const minDepth = 1
-
-	parsedURL, err := url.Parse(seedURL)
-	if err != nil {
-		return minDepth
-	}
-
-	path := strings.Trim(parsedURL.Path, "/")
-	if path == "" {
-		return minDepth
-	}
-
-	segments := strings.Split(path, "/")
-	if len(segments) < minDepth {
-		return minDepth
-	}
-
-	return len(segments)
 }
 
 func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Time) (*providers.CrawlResult, error) {
@@ -346,11 +330,13 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 		case "completed":
 			latency := time.Since(start)
 			return &providers.CrawlResult{
-				URL:         status.URL,
-				Pages:       pages,
-				TotalPages:  len(pages),
-				Latency:     latency,
-				CreditsUsed: len(pages),
+				URL:           status.URL,
+				Pages:         pages,
+				TotalPages:    len(pages),
+				Latency:       latency,
+				CreditsUsed:   len(pages),
+				RequestCount:  2,
+				UsageReported: true,
 			}, nil
 
 		case "failed", "scraping_failed":
@@ -358,11 +344,13 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 			if len(pages) > 0 {
 				latency := time.Since(start)
 				return &providers.CrawlResult{
-					URL:         status.URL,
-					Pages:       pages,
-					TotalPages:  len(pages),
-					Latency:     latency,
-					CreditsUsed: len(pages),
+					URL:           status.URL,
+					Pages:         pages,
+					TotalPages:    len(pages),
+					Latency:       latency,
+					CreditsUsed:   len(pages),
+					RequestCount:  2,
+					UsageReported: true,
 				}, nil
 			}
 			errMsg := status.Error

@@ -59,7 +59,7 @@ MXB_API_KEY=your_key                 # Preferred for Mixedbread
 # Optional Jina tuning (cost/reliability tradeoffs)
 # Defaults are cost-safe:
 # - search no-content mode enabled
-# - search max results: 3
+# - search max results: 10
 # - search retries: 0
 # - extract/crawl retries: 0
 # - extract token budget: 6000
@@ -67,7 +67,7 @@ MXB_API_KEY=your_key                 # Preferred for Mixedbread
 # - search timeout: 12s
 # - generated image captions disabled
 JINA_SEARCH_NO_CONTENT=true
-JINA_SEARCH_MAX_RESULTS=3
+JINA_SEARCH_MAX_RESULTS=10
 JINA_SEARCH_TIMEOUT=12s
 JINA_SEARCH_MAX_RETRIES=0
 JINA_EXTRACT_MAX_RETRIES=0
@@ -86,7 +86,8 @@ RERANKER_MODEL=Qwen/Qwen3-Reranker-8B
 ```
 
 If `-quality` is enabled, all 4 required `EMBEDDING_*`/`RERANKER_*` base URL + key vars must be set.
-Search scoring is model-assisted (embedding + reranker). Extract/crawl scoring is heuristic.
+Search scoring uses ground-truth metrics when provided (`expected_*` fields), optionally blended with model-assisted signals when `-quality` is enabled.
+Extract/crawl scoring also uses ground-truth-aware checks when expectations are present.
 
 ### Test Configuration (`config.toml`)
 
@@ -123,15 +124,17 @@ Notes:
 
 ## Providers
 
-| Provider | Search | Extract | Crawl | Env Var | Notes |
+| Provider | Search | Extract | Crawl | Env Var | Capability Notes |
 |---|---:|---:|---:|---|---|
-| Firecrawl | yes | yes | yes | `FIRECRAWL_API_KEY` | Native API for all 3 ops |
-| Tavily | yes | yes | yes | `TAVILY_API_KEY` | Native API for all 3 ops |
-| Brave | yes | yes | yes | `BRAVE_API_KEY` | Extract/Crawl use direct fetch strategy |
-| Exa | yes | yes | yes | `EXA_API_KEY` | Native search + fetch-based flows |
-| Jina | yes | yes | yes | `JINA_API_KEY` (recommended) | Search may require auth; defaults are cost-safe |
-| Mixedbread | yes | yes | yes | `MXB_API_KEY` or `MIXEDBREAD_API_KEY` | Supports both key names |
-| Local | no | yes | yes | none | `search` unsupported by design |
+| Firecrawl | yes | yes | yes | `FIRECRAWL_API_KEY` | Native for all ops |
+| Tavily | yes | yes | yes | `TAVILY_API_KEY` | Native for all ops |
+| Brave | yes | yes | yes | `BRAVE_API_KEY` | Search native; extract/crawl emulated |
+| Exa | yes | yes | yes | `EXA_API_KEY` | Native for all ops |
+| Jina | yes | yes | yes | `JINA_API_KEY` (recommended) | Search/extract native; crawl emulated |
+| Mixedbread | yes | yes | yes | `MXB_API_KEY` or `MIXEDBREAD_API_KEY` | Search native; extract/crawl emulated |
+| Local | no | yes | yes | none | Search unsupported; extract/crawl native local engine |
+
+Primary comparable rankings use normalized mode and native-capability operation results only.
 
 ## CLI Essentials
 
@@ -154,6 +157,17 @@ Notes:
 # Output only markdown + json
 ./build/search-api-bench -format md,json
 
+# Select execution mode
+./build/search-api-bench -mode normalized
+./build/search-api-bench -mode native
+
+# Repeat each test/provider run to reduce noise
+./build/search-api-bench -repeats 5
+
+# Normalized-mode policy for emulated operations
+./build/search-api-bench -capability-policy strict
+./build/search-api-bench -capability-policy tagged
+
 # Quick mode (up to 3 tests, timeout forced to 30s, crawl max_depth normalized to 1)
 ./build/search-api-bench -quick
 
@@ -170,6 +184,9 @@ Notes:
 | `-output` | Output base directory (overrides config) | config value |
 | `-providers` | `all` or comma list of providers | `all` |
 | `-format` | `all`, `html`, `md`, `json` | `all` |
+| `-mode` | `normalized`, `native` | `normalized` |
+| `-repeats` | repeated runs per test/provider | `3` |
+| `-capability-policy` | normalized emulated-op handling: `strict`, `tagged` | `strict` |
 | `-quality` | Enable scoring diagnostics (search model-assisted, extract/crawl heuristic) | `false` |
 | `-quick` | Reduced test run (up to 3 tests, `30s` timeout, crawl `max_depth=1`) | `false` |
 | `-debug` | Request/response debug logging | `false` |
@@ -186,6 +203,9 @@ Notes:
 - If filters result in zero providers (for example `-providers local -no-local`), execution stops with an error.
 - `-format` accepts only: `all, html, md, json`.
 - `-format all` cannot be combined with other formats.
+- `-mode` accepts only: `normalized, native`.
+- `-capability-policy` accepts only: `strict, tagged`.
+- In normalized+strict mode, emulated operations are skipped from execution.
 
 ## Reports and Metrics Semantics
 
@@ -207,6 +227,7 @@ Metrics semantics:
 - Success rate and averages are computed from executed (non-skipped) tests.
 - Skipped tests are counted and reported separately.
 - Cost summaries prefer measured per-result `CostUSD` when available.
+- Primary comparable success metrics in summaries exclude non-native/emulated rows.
 
 ## Troubleshooting
 

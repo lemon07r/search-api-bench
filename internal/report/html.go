@@ -205,7 +205,7 @@ func (g *Generator) hasQualityScores() bool {
 	for _, provider := range providers {
 		results := g.collector.GetResultsByProvider(provider)
 		for _, r := range results {
-			if r.QualityScore > 0 {
+			if r.QualityScored || r.QualityScore > 0 {
 				return true
 			}
 		}
@@ -342,7 +342,7 @@ func (g *Generator) generateTableRows() string {
 
 			if showQuality {
 				qualityStr := "-"
-				if r.QualityScore > 0 {
+				if r.QualityScored || r.QualityScore > 0 {
 					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
 				}
 				scoreFamily := scoreLabelForTestType(r.TestType)

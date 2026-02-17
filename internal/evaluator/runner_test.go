@@ -17,6 +17,7 @@ import (
 // mockProvider implements providers.Provider for testing
 type mockProvider struct {
 	name         string
+	capabilities providers.CapabilitySet
 	searchFn     func(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error)
 	extractFn    func(ctx context.Context, url string, opts providers.ExtractOptions) (*providers.ExtractResult, error)
 	crawlFn      func(ctx context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error)
@@ -31,6 +32,17 @@ func intPtr(v int) *int {
 
 func (m *mockProvider) Name() string {
 	return m.name
+}
+
+func (m *mockProvider) Capabilities() providers.CapabilitySet {
+	if m.capabilities.Search != "" || m.capabilities.Extract != "" || m.capabilities.Crawl != "" {
+		return m.capabilities
+	}
+	return providers.CapabilitySet{
+		Search:  providers.SupportNative,
+		Extract: providers.SupportNative,
+		Crawl:   providers.SupportNative,
+	}
 }
 
 func (m *mockProvider) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
@@ -77,8 +89,7 @@ func (m *mockProvider) Crawl(ctx context.Context, url string, opts providers.Cra
 }
 
 func (m *mockProvider) SupportsOperation(opType string) bool {
-	// Mock provider supports all operations by default
-	return true
+	return m.Capabilities().SupportsOperation(opType)
 }
 
 func TestRun_SingleProviderSingleTest(t *testing.T) {
@@ -615,8 +626,11 @@ func TestRun_SearchResultMetrics(t *testing.T) {
 	}
 
 	r := results[0]
-	if r.Latency != 150*time.Millisecond {
-		t.Errorf("expected latency 150ms, got %v", r.Latency)
+	if r.ProviderLatency != 150*time.Millisecond {
+		t.Errorf("expected provider latency 150ms, got %v", r.ProviderLatency)
+	}
+	if r.Latency <= 0 {
+		t.Errorf("expected wall-clock latency > 0, got %v", r.Latency)
 	}
 	if r.CreditsUsed != 1 {
 		t.Errorf("expected credits 1, got %d", r.CreditsUsed)
@@ -788,4 +802,78 @@ func TestRun_CollectorThreadSafety(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestRun_NormalizedStrictSkipsEmulatedOperations(t *testing.T) {
+	cfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency: 1,
+			Timeout:     "30s",
+			OutputDir:   t.TempDir(),
+		},
+		Tests: []config.TestConfig{
+			{Name: "extract-test", Type: "extract", URL: "https://example.com"},
+		},
+	}
+
+	mock := &mockProvider{
+		name: "emulated",
+		capabilities: providers.CapabilitySet{
+			Search:  providers.SupportNative,
+			Extract: providers.SupportEmulated,
+			Crawl:   providers.SupportNative,
+		},
+	}
+
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil, RunnerOptions{
+		Mode:             providers.ModeNormalized,
+		Repeats:          1,
+		CapabilityPolicy: CapabilityPolicyStrict,
+	})
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	results := runner.GetCollector().GetResults()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if !results[0].Skipped {
+		t.Fatal("expected emulated operation to be skipped in normalized strict mode")
+	}
+	if results[0].ExclusionReason == "" {
+		t.Fatal("expected exclusion reason to be set")
+	}
+}
+
+func TestRun_RepeatsExecuteAllRuns(t *testing.T) {
+	cfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency: 1,
+			Timeout:     "30s",
+			OutputDir:   t.TempDir(),
+		},
+		Tests: []config.TestConfig{
+			{Name: "search-test", Type: "search", Query: "q"},
+		},
+	}
+
+	mock := &mockProvider{name: "repeat-mock"}
+
+	runner := NewRunner(cfg, []providers.Provider{mock}, nil, nil, nil, RunnerOptions{
+		Mode:             providers.ModeNormalized,
+		Repeats:          3,
+		CapabilityPolicy: CapabilityPolicyStrict,
+	})
+	if err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	results := runner.GetCollector().GetResults()
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results for 3 repeats, got %d", len(results))
+	}
+	if atomic.LoadInt32(&mock.searchCalls) != 3 {
+		t.Fatalf("expected 3 search calls, got %d", mock.searchCalls)
+	}
 }
