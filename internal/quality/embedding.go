@@ -103,6 +103,7 @@ type EmbeddingClient struct {
 	httpClient *http.Client
 	cache      *embeddingCache
 	options    EmbeddingOptions
+	mu         sync.RWMutex
 }
 
 // EmbeddingResponse represents the API response
@@ -308,16 +309,22 @@ func NewEmbeddingClientWithOptions(baseURL, apiKey, model string, options Embedd
 // SetOptions updates the embedding options
 func (c *EmbeddingClient) SetOptions(options EmbeddingOptions) {
 	options.Validate()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.options = options
 }
 
 // GetOptions returns current embedding options
 func (c *EmbeddingClient) GetOptions() EmbeddingOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.options
 }
 
 // SetModel changes the embedding model
 func (c *EmbeddingClient) SetModel(model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.model = model
 }
 
@@ -330,9 +337,18 @@ func parseInt(s string) (int, error) {
 
 // Embed generates embeddings for a batch of texts with MRL and instruction support
 func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float64, error) {
+	c.mu.RLock()
+	options := c.options
+	model := c.model
+	c.mu.RUnlock()
+	return c.embedWithSnapshot(ctx, texts, model, options)
+}
+
+func (c *EmbeddingClient) embedWithSnapshot(ctx context.Context, texts []string, model string, options EmbeddingOptions) ([][]float64, error) {
 	if len(texts) == 0 {
 		return [][]float64{}, nil
 	}
+	options.Validate()
 
 	// Check cache first (include options in cache key for correctness)
 	results := make([][]float64, len(texts))
@@ -340,9 +356,9 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 	uncachedTexts := make([]string, 0, len(texts))
 
 	for i, text := range texts {
-		cacheKey := c.cacheKey(text)
+		cacheKey := c.cacheKey(text, options)
 		if cached, ok := c.cache.get(cacheKey); ok {
-			results[i] = c.truncateToDimensions(cached)
+			results[i] = truncateToDimensions(cached, options)
 		} else {
 			uncachedIndices = append(uncachedIndices, i)
 			uncachedTexts = append(uncachedTexts, text)
@@ -355,7 +371,7 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 	}
 
 	// Fetch uncached embeddings with retry logic
-	payload := c.buildRequestPayload(uncachedTexts)
+	payload := c.buildRequestPayload(model, uncachedTexts, options)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -426,12 +442,12 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 		embedding := data.Embedding
 
 		// Normalize if requested (for unit vector embeddings)
-		if c.options.Normalize {
+		if options.Normalize {
 			embedding = normalizeVector(embedding)
 		}
 
-		results[originalIndex] = c.truncateToDimensions(embedding)
-		cacheKey := c.cacheKey(uncachedTexts[data.Index])
+		results[originalIndex] = truncateToDimensions(embedding, options)
+		cacheKey := c.cacheKey(uncachedTexts[data.Index], options)
 		c.cache.set(cacheKey, embedding)
 	}
 
@@ -439,20 +455,20 @@ func (c *EmbeddingClient) Embed(ctx context.Context, texts []string) ([][]float6
 }
 
 // buildRequestPayload creates the API request payload with MRL and instruction support
-func (c *EmbeddingClient) buildRequestPayload(texts []string) map[string]interface{} {
+func (c *EmbeddingClient) buildRequestPayload(model string, texts []string, options EmbeddingOptions) map[string]interface{} {
 	payload := map[string]interface{}{
-		"model": c.model,
+		"model": model,
 		"input": texts,
 	}
 
 	// Add MRL dimensions parameter (Qwen3 supports flexible dimensions)
-	if c.options.Dimensions > 0 && c.options.Dimensions < 4096 {
-		payload["dimensions"] = c.options.Dimensions
+	if options.Dimensions > 0 && options.Dimensions < 4096 {
+		payload["dimensions"] = options.Dimensions
 	}
 
 	// Add instruction if provided (Qwen3 is instruction-aware)
-	if c.options.Instruction != "" {
-		payload["instruction"] = c.options.Instruction
+	if options.Instruction != "" {
+		payload["instruction"] = options.Instruction
 	}
 
 	// Add encoding_format for efficiency
@@ -462,17 +478,17 @@ func (c *EmbeddingClient) buildRequestPayload(texts []string) map[string]interfa
 }
 
 // cacheKey generates a unique cache key including options
-func (c *EmbeddingClient) cacheKey(text string) string {
+func (c *EmbeddingClient) cacheKey(text string, options EmbeddingOptions) string {
 	// Include dimensions and normalization in cache key
-	return fmt.Sprintf("%s:d=%d:n=%t", text, c.options.Dimensions, c.options.Normalize)
+	return fmt.Sprintf("%s:d=%d:n=%t:i=%s", text, options.Dimensions, options.Normalize, options.Instruction)
 }
 
 // truncateToDimensions truncates embedding to requested dimensions (MRL)
-func (c *EmbeddingClient) truncateToDimensions(embedding []float64) []float64 {
-	if c.options.Dimensions <= 0 || c.options.Dimensions >= len(embedding) {
+func truncateToDimensions(embedding []float64, options EmbeddingOptions) []float64 {
+	if options.Dimensions <= 0 || options.Dimensions >= len(embedding) {
 		return embedding
 	}
-	return embedding[:c.options.Dimensions]
+	return embedding[:options.Dimensions]
 }
 
 // normalizeVector normalizes a vector to unit length (L2 norm)
@@ -508,12 +524,24 @@ func (c *EmbeddingClient) EmbedSingle(ctx context.Context, text string) ([]float
 
 // EmbedWithInstruction generates embedding with a specific instruction
 func (c *EmbeddingClient) EmbedWithInstruction(ctx context.Context, text, instruction string) ([]float64, error) {
-	// Temporarily set instruction
-	oldOptions := c.options
-	c.options.Instruction = instruction
-	defer func() { c.options = oldOptions }()
+	embeddings, err := c.EmbedBatchWithInstruction(ctx, []string{text}, instruction)
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+	return embeddings[0], nil
+}
 
-	return c.EmbedSingle(ctx, text)
+// EmbedBatchWithInstruction generates embeddings for a batch with a custom instruction.
+func (c *EmbeddingClient) EmbedBatchWithInstruction(ctx context.Context, texts []string, instruction string) ([][]float64, error) {
+	options := c.GetOptions()
+	options.Instruction = instruction
+	c.mu.RLock()
+	model := c.model
+	c.mu.RUnlock()
+	return c.embedWithSnapshot(ctx, texts, model, options)
 }
 
 // CacheStats returns cache performance statistics

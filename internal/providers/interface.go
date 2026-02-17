@@ -9,6 +9,63 @@ import (
 	"github.com/lamim/search-api-bench/internal/debug"
 )
 
+// SupportLevel describes the implementation quality for an operation.
+type SupportLevel string
+
+const (
+	// SupportNative indicates first-class native provider support.
+	SupportNative SupportLevel = "native"
+	// SupportEmulated indicates a fallback strategy (not first-class).
+	SupportEmulated SupportLevel = "emulated"
+	// SupportUnsupported indicates the operation is not available.
+	SupportUnsupported SupportLevel = "unsupported"
+)
+
+// RunMode defines benchmark execution mode.
+type RunMode string
+
+const (
+	// ModeNormalized enforces mostly comparable settings across providers.
+	ModeNormalized RunMode = "normalized"
+	// ModeNative allows provider-optimized native settings.
+	ModeNative RunMode = "native"
+)
+
+// CapabilitySet describes provider support by operation.
+type CapabilitySet struct {
+	Search  SupportLevel
+	Extract SupportLevel
+	Crawl   SupportLevel
+}
+
+// ForOperation returns the support level for the given operation.
+func (c CapabilitySet) ForOperation(opType string) SupportLevel {
+	switch opType {
+	case "search":
+		if c.Search == "" {
+			return SupportUnsupported
+		}
+		return c.Search
+	case "extract":
+		if c.Extract == "" {
+			return SupportUnsupported
+		}
+		return c.Extract
+	case "crawl":
+		if c.Crawl == "" {
+			return SupportUnsupported
+		}
+		return c.Crawl
+	default:
+		return SupportUnsupported
+	}
+}
+
+// SupportsOperation checks support from the capability set.
+func (c CapabilitySet) SupportsOperation(opType string) bool {
+	return c.ForOperation(opType) != SupportUnsupported
+}
+
 // contextKey is a private type for context keys to avoid collisions
 type contextKey int
 
@@ -52,7 +109,10 @@ type SearchResult struct {
 	TotalResults int
 	Latency      time.Duration
 	CreditsUsed  int
-	RawResponse  []byte
+	RequestCount int
+	// UsageReported indicates credits/tokens came from provider usage metadata.
+	UsageReported bool
+	RawResponse   []byte
 }
 
 // SearchItem represents a single search result
@@ -66,22 +126,26 @@ type SearchItem struct {
 
 // ExtractResult represents the result of a content extraction operation
 type ExtractResult struct {
-	URL         string
-	Title       string
-	Content     string
-	Markdown    string
-	Metadata    map[string]interface{}
-	Latency     time.Duration
-	CreditsUsed int
+	URL           string
+	Title         string
+	Content       string
+	Markdown      string
+	Metadata      map[string]interface{}
+	Latency       time.Duration
+	CreditsUsed   int
+	RequestCount  int
+	UsageReported bool
 }
 
 // CrawlResult represents the result of a crawl operation
 type CrawlResult struct {
-	URL         string
-	Pages       []CrawledPage
-	TotalPages  int
-	Latency     time.Duration
-	CreditsUsed int
+	URL           string
+	Pages         []CrawledPage
+	TotalPages    int
+	Latency       time.Duration
+	CreditsUsed   int
+	RequestCount  int
+	UsageReported bool
 }
 
 // CrawledPage represents a single page from a crawl
@@ -96,6 +160,8 @@ type CrawledPage struct {
 // Provider defines the interface for search/crawl providers
 type Provider interface {
 	Name() string
+	// Capabilities returns support level by operation.
+	Capabilities() CapabilitySet
 	// SupportsOperation returns whether the provider supports the given operation type
 	// Valid operation types: "search", "extract", "crawl"
 	SupportsOperation(opType string) bool

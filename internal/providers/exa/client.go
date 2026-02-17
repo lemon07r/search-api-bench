@@ -58,14 +58,18 @@ func (c *Client) Name() string {
 	return "exa"
 }
 
+// Capabilities returns Exa operation support levels.
+func (c *Client) Capabilities() providers.CapabilitySet {
+	return providers.CapabilitySet{
+		Search:  providers.SupportNative,
+		Extract: providers.SupportNative,
+		Crawl:   providers.SupportNative,
+	}
+}
+
 // SupportsOperation returns whether Exa supports the given operation type
 func (c *Client) SupportsOperation(opType string) bool {
-	switch opType {
-	case "search", "extract", "crawl":
-		return true
-	default:
-		return false
-	}
+	return c.Capabilities().SupportsOperation(opType)
 }
 
 // Search performs a web search using Exa AI API
@@ -161,6 +165,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
+		RequestCount: 1,
 		RawResponse:  resp.Body,
 	}, nil
 }
@@ -235,13 +240,14 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	creditsUsed := 1
 
 	return &providers.ExtractResult{
-		URL:         pageURL,
-		Title:       r.Title,
-		Content:     r.Text,
-		Markdown:    r.Text, // Exa returns clean text, treat as markdown
-		Metadata:    metadata,
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
+		URL:          pageURL,
+		Title:        r.Title,
+		Content:      r.Text,
+		Markdown:     r.Text, // Exa returns clean text, treat as markdown
+		Metadata:     metadata,
+		Latency:      latency,
+		CreditsUsed:  creditsUsed,
+		RequestCount: 1,
 	}, nil
 }
 
@@ -337,11 +343,12 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 	latency := time.Since(start)
 
 	return &providers.CrawlResult{
-		URL:         startURL,
-		Pages:       pages,
-		TotalPages:  len(pages),
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
+		URL:          startURL,
+		Pages:        pages,
+		TotalPages:   len(pages),
+		Latency:      latency,
+		CreditsUsed:  creditsUsed,
+		RequestCount: 1 + ((len(urls) + batchSize - 1) / batchSize),
 	}, nil
 }
 
@@ -411,11 +418,12 @@ func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ provider
 	latency := time.Since(startTime)
 
 	return &providers.CrawlResult{
-		URL:         pageURL,
-		Pages:       pages,
-		TotalPages:  1,
-		Latency:     latency,
-		CreditsUsed: extractResult.CreditsUsed,
+		URL:          pageURL,
+		Pages:        pages,
+		TotalPages:   1,
+		Latency:      latency,
+		CreditsUsed:  extractResult.CreditsUsed,
+		RequestCount: 1,
 	}, nil
 }
 

@@ -32,10 +32,18 @@ type TestConfig struct {
 	URL   string `toml:"url,omitempty"`
 	// MaxPages and MaxDepth are pointers so explicit zero values in TOML
 	// are distinguishable from unset fields.
-	MaxPages        *int     `toml:"max_pages,omitempty"`
-	MaxDepth        *int     `toml:"max_depth,omitempty"`
-	ExpectedTopics  []string `toml:"expected_topics,omitempty"`
-	ExpectedContent []string `toml:"expected_content,omitempty"`
+	MaxPages               *int     `toml:"max_pages,omitempty"`
+	MaxDepth               *int     `toml:"max_depth,omitempty"`
+	ExpectedTopics         []string `toml:"expected_topics,omitempty"`
+	ExpectedContent        []string `toml:"expected_content,omitempty"`
+	ExpectedURLs           []string `toml:"expected_urls,omitempty"`
+	MustIncludeTerms       []string `toml:"must_include_terms,omitempty"`
+	MustNotIncludeTerms    []string `toml:"must_not_include_terms,omitempty"`
+	ExpectedSnippets       []string `toml:"expected_snippets,omitempty"`
+	ForbiddenSnippets      []string `toml:"forbidden_snippets,omitempty"`
+	ExpectedURLPatterns    []string `toml:"expected_url_patterns,omitempty"`
+	ExpectedMaxDepth       *int     `toml:"expected_max_depth,omitempty"`
+	FreshnessReferenceDate string   `toml:"freshness_reference_date,omitempty"`
 }
 
 // TimeoutDuration parses the timeout string into a Duration
@@ -113,6 +121,9 @@ func Load(path string) (*Config, error) {
 		}
 		if test.MaxDepth != nil && *test.MaxDepth < 0 {
 			return nil, fmt.Errorf("test '%s' has invalid max_depth: %d", test.Name, *test.MaxDepth)
+		}
+		if test.ExpectedMaxDepth != nil && *test.ExpectedMaxDepth < 0 {
+			return nil, fmt.Errorf("test '%s' has invalid expected_max_depth: %d", test.Name, *test.ExpectedMaxDepth)
 		}
 	}
 

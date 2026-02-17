@@ -48,14 +48,18 @@ func (c *Client) Name() string {
 	return "tavily"
 }
 
+// Capabilities returns Tavily operation support levels.
+func (c *Client) Capabilities() providers.CapabilitySet {
+	return providers.CapabilitySet{
+		Search:  providers.SupportNative,
+		Extract: providers.SupportNative,
+		Crawl:   providers.SupportNative,
+	}
+}
+
 // SupportsOperation returns whether Tavily supports the given operation type
 func (c *Client) SupportsOperation(opType string) bool {
-	switch opType {
-	case "search", "extract", "crawl":
-		return true
-	default:
-		return false
-	}
+	return c.Capabilities().SupportsOperation(opType)
 }
 
 // Search performs a web search using Tavily
@@ -139,6 +143,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
+		RequestCount: 1,
 		RawResponse:  resp.Body,
 	}, nil
 }
@@ -203,13 +208,14 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	creditsUsed := 1
 
 	return &providers.ExtractResult{
-		URL:         url,
-		Title:       r.Title,
-		Content:     r.RawContent,
-		Markdown:    r.RawContent,
-		Metadata:    map[string]interface{}{"images": r.Images},
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
+		URL:          url,
+		Title:        r.Title,
+		Content:      r.RawContent,
+		Markdown:     r.RawContent,
+		Metadata:     map[string]interface{}{"images": r.Images},
+		Latency:      latency,
+		CreditsUsed:  creditsUsed,
+		RequestCount: 1,
 	}, nil
 }
 
@@ -322,11 +328,12 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	latency := time.Since(start)
 
 	return &providers.CrawlResult{
-		URL:         url,
-		Pages:       pages,
-		TotalPages:  len(pages),
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
+		URL:          url,
+		Pages:        pages,
+		TotalPages:   len(pages),
+		Latency:      latency,
+		CreditsUsed:  creditsUsed,
+		RequestCount: 1 + len(pages),
 	}, nil
 }
 

@@ -153,7 +153,8 @@ func (cc *CostCalculator) CalculateProviderCost(provider string, creditsUsed int
 		// For Brave, creditsUsed represents request count
 		return cc.CalculateBraveCost(creditsUsed, testType)
 	case "exa":
-		return cc.CalculateExaCost(creditsUsed, testType, false)
+		isContentFetch := testType == "extract" || testType == "crawl"
+		return cc.CalculateExaCost(creditsUsed, testType, isContentFetch)
 	case "jina":
 		// For Jina, creditsUsed represents token count
 		return cc.CalculateJinaCost(creditsUsed, testType)

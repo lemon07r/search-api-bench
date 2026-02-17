@@ -9,25 +9,34 @@ import (
 
 // Result represents a single test result
 type Result struct {
-	TestName      string        `json:"test_name"`
-	Provider      string        `json:"provider"`
-	TestType      string        `json:"test_type"`
-	Success       bool          `json:"success"`
-	Skipped       bool          `json:"skipped,omitempty"`
-	SkipReason    string        `json:"skip_reason,omitempty"`
-	Error         string        `json:"error,omitempty"`
-	ErrorCategory string        `json:"error_category,omitempty"`
-	Latency       time.Duration `json:"latency"`
-	CreditsUsed   int           `json:"credits_used"`
-	ContentLength int           `json:"content_length"`
-	ResultsCount  int           `json:"results_count"`
-	Timestamp     time.Time     `json:"timestamp"`
+	TestName            string        `json:"test_name"`
+	Provider            string        `json:"provider"`
+	TestType            string        `json:"test_type"`
+	RunMode             string        `json:"mode,omitempty"`
+	Repeat              int           `json:"repeat,omitempty"`
+	ImplementationType  string        `json:"implementation_type,omitempty"`
+	ExcludedFromPrimary bool          `json:"excluded_from_primary,omitempty"`
+	ExclusionReason     string        `json:"exclusion_reason,omitempty"`
+	Success             bool          `json:"success"`
+	Skipped             bool          `json:"skipped,omitempty"`
+	SkipReason          string        `json:"skip_reason,omitempty"`
+	Error               string        `json:"error,omitempty"`
+	ErrorCategory       string        `json:"error_category,omitempty"`
+	Latency             time.Duration `json:"latency"`
+	ProviderLatency     time.Duration `json:"provider_latency,omitempty"`
+	CreditsUsed         int           `json:"credits_used"`
+	RequestCount        int           `json:"request_count,omitempty"`
+	UsageReported       bool          `json:"usage_reported,omitempty"`
+	ContentLength       int           `json:"content_length"`
+	ResultsCount        int           `json:"results_count"`
+	Timestamp           time.Time     `json:"timestamp"`
 
 	// Cost in USD (calculated from provider-specific pricing)
 	CostUSD float64 `json:"cost_usd"`
 
 	// Quality scores (0-100)
 	QualityScore      float64                `json:"quality_score,omitempty"`
+	QualityScored     bool                   `json:"quality_scored,omitempty"`
 	SemanticScore     float64                `json:"semantic_score,omitempty"`
 	RerankerScore     float64                `json:"reranker_score,omitempty"`
 	DomainScores      map[string]float64     `json:"domain_scores,omitempty"`
@@ -36,25 +45,29 @@ type Result struct {
 
 // Summary contains aggregated metrics for a provider
 type Summary struct {
-	Provider           string        `json:"provider"`
-	TotalTests         int           `json:"total_tests"`
-	ExecutedTests      int           `json:"executed_tests"`
-	SuccessfulTests    int           `json:"successful_tests"`
-	FailedTests        int           `json:"failed_tests"`
-	SkippedTests       int           `json:"skipped_tests"`
-	SuccessRate        float64       `json:"success_rate"`
-	TotalLatency       time.Duration `json:"total_latency"`
-	AvgLatency         time.Duration `json:"avg_latency"`
-	MinLatency         time.Duration `json:"min_latency"`
-	MaxLatency         time.Duration `json:"max_latency"`
-	P50Latency         time.Duration `json:"p50_latency"`
-	P95Latency         time.Duration `json:"p95_latency"`
-	P99Latency         time.Duration `json:"p99_latency"`
-	TotalCreditsUsed   int           `json:"total_credits_used"`
-	AvgCreditsPerReq   float64       `json:"avg_credits_per_req"`
-	TotalContentLength int           `json:"total_content_length"`
-	AvgContentLength   float64       `json:"avg_content_length"`
-	ResultsPerQuery    float64       `json:"results_per_query"`
+	Provider                     string        `json:"provider"`
+	TotalTests                   int           `json:"total_tests"`
+	ExecutedTests                int           `json:"executed_tests"`
+	PrimaryComparableTests       int           `json:"primary_comparable_tests"`
+	PrimaryComparableSuccesses   int           `json:"primary_comparable_successes"`
+	PrimaryComparableSuccessRate float64       `json:"primary_comparable_success_rate"`
+	SuccessfulTests              int           `json:"successful_tests"`
+	FailedTests                  int           `json:"failed_tests"`
+	SkippedTests                 int           `json:"skipped_tests"`
+	ExcludedFromPrimary          int           `json:"excluded_from_primary"`
+	SuccessRate                  float64       `json:"success_rate"`
+	TotalLatency                 time.Duration `json:"total_latency"`
+	AvgLatency                   time.Duration `json:"avg_latency"`
+	MinLatency                   time.Duration `json:"min_latency"`
+	MaxLatency                   time.Duration `json:"max_latency"`
+	P50Latency                   time.Duration `json:"p50_latency"`
+	P95Latency                   time.Duration `json:"p95_latency"`
+	P99Latency                   time.Duration `json:"p99_latency"`
+	TotalCreditsUsed             int           `json:"total_credits_used"`
+	AvgCreditsPerReq             float64       `json:"avg_credits_per_req"`
+	TotalContentLength           int           `json:"total_content_length"`
+	AvgContentLength             float64       `json:"avg_content_length"`
+	ResultsPerQuery              float64       `json:"results_per_query"`
 
 	// Cost metrics in USD
 	TotalCostUSD  float64 `json:"total_cost_usd"`   // total USD cost
@@ -137,6 +150,8 @@ func (c *Collector) GetResultsByTest(testName string) []Result {
 }
 
 // ComputeSummary computes summary metrics for a provider
+//
+//nolint:gocyclo // Summary aggregation intentionally keeps all metric semantics in one place.
 func (c *Collector) ComputeSummary(provider string) *Summary {
 	results := c.GetResultsByProvider(provider)
 
@@ -162,6 +177,7 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 
 	latencies := make([]time.Duration, 0, len(results))
 	executedCount := 0
+	primaryExecutedCount := 0
 
 	for _, r := range results {
 		// Handle skipped tests separately
@@ -170,9 +186,17 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 			continue // Don't count skipped tests in success/failure metrics
 		}
 		executedCount++
+		if r.ExcludedFromPrimary {
+			summary.ExcludedFromPrimary++
+		} else {
+			primaryExecutedCount++
+		}
 
 		if r.Success {
 			summary.SuccessfulTests++
+			if !r.ExcludedFromPrimary {
+				summary.PrimaryComparableSuccesses++
+			}
 		} else {
 			summary.FailedTests++
 			// Track error breakdown
@@ -211,8 +235,8 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 			}
 		}
 
-		// Track quality scores
-		if r.QualityScore > 0 {
+		// Track quality scores (support legacy payloads where only QualityScore was set).
+		if r.QualityScored || r.QualityScore > 0 {
 			totalQualityScore += r.QualityScore
 			qualityScoreCount++
 
@@ -233,6 +257,7 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	summary.TotalCreditsUsed = totalCredits
 	summary.TotalContentLength = totalContentLength
 	summary.ExecutedTests = executedCount
+	summary.PrimaryComparableTests = primaryExecutedCount
 	if executedCount > 0 {
 		summary.AvgLatency = totalLatency / time.Duration(executedCount)
 		summary.AvgCreditsPerReq = float64(totalCredits) / float64(executedCount)
@@ -251,6 +276,9 @@ func (c *Collector) ComputeSummary(provider string) *Summary {
 	if executedCount > 0 {
 		summary.SuccessRate = float64(summary.SuccessfulTests) / float64(executedCount) * 100
 		summary.ResultsPerQuery = float64(totalResultsCount) / float64(executedCount)
+	}
+	if primaryExecutedCount > 0 {
+		summary.PrimaryComparableSuccessRate = float64(summary.PrimaryComparableSuccesses) / float64(primaryExecutedCount) * 100
 	}
 
 	// Calculate efficiency metrics (kept for backward compatibility)

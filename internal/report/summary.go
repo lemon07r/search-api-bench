@@ -105,7 +105,7 @@ func (g *Generator) computeProviderQualityByTestType(provider string) providerQu
 		}
 
 		acc.ExecutedTests++
-		if r.QualityScore > 0 {
+		if r.QualityScored || r.QualityScore > 0 {
 			acc.ScoredTests++
 			typeTotals[r.TestType] += r.QualityScore
 		}
@@ -177,16 +177,19 @@ func (g *Generator) writeQualityByTestType(sb *strings.Builder, providers []stri
 // writeComparisonTable writes the comparison table for all providers
 func (g *Generator) writeComparisonTable(sb *strings.Builder, providers []string) {
 	sb.WriteString("### Summary by Provider\n\n")
-	sb.WriteString("| Provider | Tests | Executed | Skipped | Success Rate | Avg Latency | Total Cost (USD) | Avg Content | Scoring Coverage |\n")
-	sb.WriteString("|----------|-------|----------|---------|--------------|-------------|------------------|-------------|------------------|\n")
+	sb.WriteString("| Provider | Tests | Executed | Primary Comparable | Skipped | Excluded Primary | Success Rate | Primary Success | Avg Latency | Total Cost (USD) | Avg Content | Scoring Coverage |\n")
+	sb.WriteString("|----------|-------|----------|--------------------|---------|------------------|--------------|-----------------|-------------|------------------|-------------|------------------|\n")
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
-		fmt.Fprintf(sb, "| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars | %.1f%% |\n",
+		fmt.Fprintf(sb, "| %s | %d | %d | %d | %d | %d | %.1f%% | %.1f%% | %s | %s | %.0f chars | %.1f%% |\n",
 			provider,
 			summary.TotalTests,
 			summary.ExecutedTests,
+			summary.PrimaryComparableTests,
 			summary.SkippedTests,
+			summary.ExcludedFromPrimary,
 			summary.SuccessRate,
+			summary.PrimaryComparableSuccessRate,
 			FormatLatency(summary.AvgLatency),
 			formatCostUSD(summary.TotalCostUSD),
 			summary.AvgContentLength,
@@ -442,7 +445,7 @@ func (g *Generator) GenerateMarkdown() error {
 	for _, provider := range providers {
 		results := g.collector.GetResultsByProvider(provider)
 		for _, r := range results {
-			if r.QualityScore > 0 {
+			if r.QualityScored || r.QualityScore > 0 {
 				hasQualityScores = true
 				break
 			}
@@ -486,7 +489,7 @@ func (g *Generator) GenerateMarkdown() error {
 
 			if hasQualityScores {
 				qualityStr := "-"
-				if r.QualityScore > 0 {
+				if r.QualityScored || r.QualityScore > 0 {
 					qualityStr = fmt.Sprintf("%.1f", r.QualityScore)
 				}
 				semanticStr := "-"
@@ -543,10 +546,11 @@ func (g *Generator) GenerateMarkdown() error {
 // GenerateJSON creates a JSON report with raw data
 func (g *Generator) GenerateJSON() error {
 	data := map[string]interface{}{
-		"timestamp": time.Now(),
-		"providers": g.collector.GetAllProviders(),
-		"tests":     g.collector.GetAllTests(),
-		"results":   g.collector.GetResults(),
+		"schema_version": "v2",
+		"timestamp":      time.Now(),
+		"providers":      g.collector.GetAllProviders(),
+		"tests":          g.collector.GetAllTests(),
+		"results":        g.collector.GetResults(),
 	}
 
 	// Add summaries

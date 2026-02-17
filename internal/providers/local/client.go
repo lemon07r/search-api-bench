@@ -40,17 +40,19 @@ func (c *Client) Name() string {
 	return "local"
 }
 
+// Capabilities returns local provider operation support levels.
+func (c *Client) Capabilities() providers.CapabilitySet {
+	return providers.CapabilitySet{
+		Search:  providers.SupportUnsupported,
+		Extract: providers.SupportNative,
+		Crawl:   providers.SupportNative,
+	}
+}
+
 // SupportsOperation returns whether the local provider supports the given operation type
 // Local provider only supports extract and crawl, not search (no web index)
 func (c *Client) SupportsOperation(opType string) bool {
-	switch opType {
-	case "extract", "crawl":
-		return true
-	case "search":
-		return false // Local provider cannot index the web
-	default:
-		return false
-	}
+	return c.Capabilities().SupportsOperation(opType)
 }
 
 // Search is not supported for a local crawler as it cannot index the entire web.
@@ -163,13 +165,14 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	latency := time.Since(start)
 
 	return &providers.ExtractResult{
-		URL:         pageURL,
-		Title:       title,
-		Content:     markdown, // Return markdown as content (consistent with other providers)
-		Markdown:    markdown,
-		Metadata:    metadata,
-		Latency:     latency,
-		CreditsUsed: 0, // Local crawling is free!
+		URL:          pageURL,
+		Title:        title,
+		Content:      markdown, // Return markdown as content (consistent with other providers)
+		Markdown:     markdown,
+		Metadata:     metadata,
+		Latency:      latency,
+		CreditsUsed:  0, // Local crawling is free!
+		RequestCount: 1,
 	}, nil
 }
 
@@ -266,11 +269,12 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 	latency := time.Since(start)
 
 	return &providers.CrawlResult{
-		URL:         startURL,
-		Pages:       pages,
-		TotalPages:  len(pages),
-		Latency:     latency,
-		CreditsUsed: 0, // Local crawling is free!
+		URL:          startURL,
+		Pages:        pages,
+		TotalPages:   len(pages),
+		Latency:      latency,
+		CreditsUsed:  0, // Local crawling is free!
+		RequestCount: len(pages),
 	}, nil
 }
 

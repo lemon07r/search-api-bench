@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -64,14 +65,18 @@ func (c *Client) Name() string {
 	return "mixedbread"
 }
 
+// Capabilities returns Mixedbread operation support levels.
+func (c *Client) Capabilities() providers.CapabilitySet {
+	return providers.CapabilitySet{
+		Search:  providers.SupportNative,
+		Extract: providers.SupportEmulated,
+		Crawl:   providers.SupportEmulated,
+	}
+}
+
 // SupportsOperation returns whether Mixedbread supports the given operation type
 func (c *Client) SupportsOperation(opType string) bool {
-	switch opType {
-	case "search", "extract", "crawl":
-		return true
-	default:
-		return false
-	}
+	return c.Capabilities().SupportsOperation(opType)
 }
 
 // Search performs a web search using Mixedbread AI Search API
@@ -151,6 +156,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		TotalResults: len(items),
 		Latency:      latency,
 		CreditsUsed:  creditsUsed,
+		RequestCount: 1,
 		RawResponse:  resp.Body,
 	}, nil
 }
@@ -203,13 +209,14 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 	}
 
 	return &providers.ExtractResult{
-		URL:         pageURL,
-		Title:       title,
-		Content:     content,
-		Markdown:    content,
-		Metadata:    metadata,
-		Latency:     latency,
-		CreditsUsed: 0, // Direct fetch
+		URL:          pageURL,
+		Title:        title,
+		Content:      content,
+		Markdown:     content,
+		Metadata:     metadata,
+		Latency:      latency,
+		CreditsUsed:  0, // Direct fetch
+		RequestCount: 1,
 	}, nil
 }
 
@@ -295,11 +302,12 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 	latency := time.Since(start)
 
 	return &providers.CrawlResult{
-		URL:         startURL,
-		Pages:       pages,
-		TotalPages:  len(pages),
-		Latency:     latency,
-		CreditsUsed: creditsUsed,
+		URL:          startURL,
+		Pages:        pages,
+		TotalPages:   len(pages),
+		Latency:      latency,
+		CreditsUsed:  creditsUsed,
+		RequestCount: len(pages),
 	}, nil
 }
 
@@ -321,10 +329,53 @@ func cleanContent(content string) string {
 	return strings.TrimSpace(content)
 }
 
-func extractLinks(_, _ string) []string {
-	// Simplified link extraction - in practice would parse HTML
-	// For now, return empty (this is a limitation of the simple approach)
-	return []string{}
+func extractLinks(content, domain string) []string {
+	seen := make(map[string]struct{})
+	links := make([]string, 0, 16)
+
+	addLink := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		if strings.HasPrefix(raw, "/") {
+			raw = "https://" + domain + raw
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			return
+		}
+		if parsed.Host == "" {
+			return
+		}
+		if parsed.Host != domain {
+			return
+		}
+		parsed.Fragment = ""
+		parsed.RawFragment = ""
+		normalized := parsed.String()
+		if _, ok := seen[normalized]; ok {
+			return
+		}
+		seen[normalized] = struct{}{}
+		links = append(links, normalized)
+	}
+
+	// Markdown links: [label](url)
+	markdownLinkRe := regexp.MustCompile(`\[[^\]]+\]\(([^)\s]+)\)`)
+	for _, match := range markdownLinkRe.FindAllStringSubmatch(content, -1) {
+		if len(match) > 1 {
+			addLink(match[1])
+		}
+	}
+
+	// Plain absolute URLs
+	plainURLRe := regexp.MustCompile(`https?://[^\s)\]">]+`)
+	for _, raw := range plainURLRe.FindAllString(content, -1) {
+		addLink(raw)
+	}
+
+	return links
 }
 
 // Response types for Mixedbread Stores Search API
