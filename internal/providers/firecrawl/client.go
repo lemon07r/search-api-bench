@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,13 +38,29 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("FIRECRAWL_API_KEY environment variable not set")
 	}
 
+	retryCfg := providers.DefaultRetryConfig()
+
+	// Configure per-provider rate limiter.
+	// FIRECRAWL_RATE_LIMIT overrides the default (requests per minute).
+	// Default: 5 req/min (conservative for free tier's 6 req/min ceiling).
+	// Set to 0 to disable rate limiting (e.g. paid plans with high limits).
+	ratePerMin := 5.0
+	if v := os.Getenv("FIRECRAWL_RATE_LIMIT"); v != "" {
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			ratePerMin = parsed
+		}
+	}
+	if ratePerMin > 0 {
+		retryCfg.Limiter = providers.NewRateLimiter(ratePerMin / 60.0)
+	}
+
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		retryCfg: providers.DefaultRetryConfig(),
+		retryCfg: retryCfg,
 	}, nil
 }
 

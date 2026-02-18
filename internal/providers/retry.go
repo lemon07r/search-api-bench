@@ -20,7 +20,8 @@ type RetryConfig struct {
 	InitialBackoff  time.Duration
 	MaxBackoff      time.Duration
 	BackoffFactor   float64
-	RetryableErrors []int // HTTP status codes to retry
+	RetryableErrors []int        // HTTP status codes to retry
+	Limiter         *RateLimiter // optional per-provider rate limiter; nil = no limit
 }
 
 // DefaultRetryConfig returns a default retry configuration
@@ -268,6 +269,13 @@ func (rc *RetryConfig) DoHTTPRequestDetailed(ctx context.Context, client *http.C
 		case <-ctx.Done():
 			return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 		default:
+		}
+
+		// Proactively wait for rate limiter before sending the request.
+		if rc.Limiter != nil {
+			if err := rc.Limiter.Wait(ctx); err != nil {
+				return nil, err
+			}
 		}
 
 		// Clone request for retry.
