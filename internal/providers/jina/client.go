@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -40,6 +39,9 @@ const (
 	defaultCrawlTokenBudget      = 4000
 	defaultSearchNoContent       = true
 	defaultEnableImageCaptioning = false
+
+	// Jina charges a minimum of 10,000 tokens per search request.
+	minSearchTokens = 10000
 )
 
 // Client represents a Jina AI API client
@@ -151,7 +153,7 @@ func (c *Client) SupportsOperation(opType string) bool {
 }
 
 // Search performs a web search using Jina AI Search API.
-// Endpoint: GET https://s.jina.ai/?q={query}
+// Endpoint: POST https://s.jina.ai/
 // Default mode uses X-Respond-With:no-content for lower token spend.
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	searchStart := time.Now()
@@ -190,7 +192,8 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	return result, nil
 }
 
-// searchInternal performs the actual search request
+// searchInternal performs the actual search request using POST with JSON body
+// and Accept: application/json header per official Jina Search API docs.
 func (c *Client) searchInternal(ctx context.Context, query string, opts providers.SearchOptions, noContent bool) (*providers.SearchResult, error) {
 	start := time.Now()
 	reqCtx := ctx
@@ -207,11 +210,24 @@ func (c *Client) searchInternal(ctx context.Context, query string, opts provider
 	if topN <= 0 {
 		topN = defaultSearchMaxResults
 	}
-	// Build search URL with query parameter.
-	searchURL := fmt.Sprintf("%s/?q=%s&top_n=%d", c.searchBaseURL, url.QueryEscape(query), topN)
+
+	// Build POST JSON body per official API docs.
+	searchPayload := searchRequest{
+		Query:      query,
+		NumResults: topN,
+	}
+	payloadBytes, err := json.Marshal(searchPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal search request: %w", err)
+	}
+
+	searchURL := c.searchBaseURL + "/"
 
 	// Prepare headers
-	headers := make(map[string]string)
+	headers := map[string]string{
+		"Content-Type": "application/json",
+		"Accept":       "application/json",
+	}
 	if c.apiKey != "" {
 		headers["Authorization"] = "Bearer " + c.apiKey
 	}
@@ -223,17 +239,19 @@ func (c *Client) searchInternal(ctx context.Context, query string, opts provider
 	}
 
 	// Log the request
-	logRequest(ctx, "GET", searchURL, headers, "")
+	logRequest(ctx, "POST", searchURL, headers, string(payloadBytes))
 
 	// Create request with trace context for timing
 	traceCtx, timing, finalize := newTraceContext(reqCtx)
-	req, err := http.NewRequestWithContext(traceCtx, "GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(traceCtx, "POST", searchURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "request_build", "search request")
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add authorization if API key is available
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
@@ -272,38 +290,34 @@ func (c *Client) searchInternal(ctx context.Context, query string, opts provider
 
 	// Check for non-OK status codes first
 	if resp.StatusCode != http.StatusOK {
-		// Check if response is JSON error or plain text
 		contentType := resp.Header.Get("Content-Type")
-		if isJSONContent(contentType) {
-			providers.LogError(ctx, string(respBody), "http_status", "search non-200 response")
-			return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
-		}
-		// Plain text error (likely rate limit)
 		errMsg := strings.TrimSpace(string(respBody))
 		if resp.StatusCode == http.StatusTooManyRequests || isRateLimitError(errMsg) {
 			providers.LogError(ctx, errMsg, "rate_limit", "search non-200 response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", errMsg)
 		}
-		providers.LogError(ctx, errMsg, "http_status", "search non-200 response")
+		if isJSONContent(contentType) {
+			providers.LogError(ctx, errMsg, "http_status", "search non-200 response")
+		} else {
+			providers.LogError(ctx, errMsg, "http_status", "search non-200 response")
+		}
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, errMsg)
 	}
 
-	// Check if response is actually JSON
+	// With Accept: application/json header, response should always be JSON.
+	// Fall back to plain text parsing only if Content-Type is explicitly non-JSON.
 	contentType := resp.Header.Get("Content-Type")
-	if !isJSONContent(contentType) {
-		// Handle plain text response (rate limiting without proper status code)
+	if !isJSONContent(contentType) && contentType != "" {
 		textResp := strings.TrimSpace(string(respBody))
 		if isRateLimitError(textResp) {
 			providers.LogError(ctx, textResp, "rate_limit", "search text response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", textResp)
 		}
-		// Try to parse as plain text search results
 		return c.parsePlainTextSearchResponse(query, textResp, start)
 	}
 
 	var result searchResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		// Check if the body is a plain text error message
 		textBody := strings.TrimSpace(string(respBody))
 		if isRateLimitError(textBody) {
 			providers.LogError(ctx, textBody, "rate_limit", "search parse response")
@@ -333,10 +347,13 @@ func (c *Client) searchInternal(ctx context.Context, query string, opts provider
 		totalContentLen += len(r.Title) + len(r.Content)
 	}
 
-	// Jina bills by processed tokens; when usage isn't returned, estimate from body length.
+	// Jina bills by processed tokens; enforce minimum 10,000 tokens per search request.
 	creditsUsed := tokenEstimateFromBytes(respBody)
 	if creditsUsed == 0 {
 		creditsUsed = tokenEstimateFromChars(totalContentLen)
+	}
+	if creditsUsed < minSearchTokens {
+		creditsUsed = minSearchTokens
 	}
 
 	return &providers.SearchResult{
@@ -373,7 +390,8 @@ func (c *Client) executeExtractWithRetry(ctx context.Context, pageURL string, op
 	return result, nil
 }
 
-// extractInternal performs the actual extract request
+// extractInternal performs the actual extract request with Accept: application/json
+// to ensure structured JSON responses from the Reader API.
 func (c *Client) extractInternal(ctx context.Context, pageURL string, _ providers.ExtractOptions, tokenBudget int) (*providers.ExtractResult, error) {
 	start := time.Now()
 
@@ -388,6 +406,7 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 
 	// Prepare headers
 	headers := make(map[string]string)
+	headers["Accept"] = "application/json"
 	if c.apiKey != "" {
 		headers["Authorization"] = "Bearer " + c.apiKey
 	}
@@ -409,7 +428,8 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add authorization if API key is available
+	// Set headers
+	req.Header.Set("Accept", "application/json")
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
@@ -448,9 +468,8 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 
 	// Check for non-OK status codes with proper error handling
 	if resp.StatusCode != http.StatusOK {
-		contentType := resp.Header.Get("Content-Type")
 		errMsg := strings.TrimSpace(string(respBody))
-		if !isJSONContent(contentType) && isRateLimitError(errMsg) {
+		if resp.StatusCode == http.StatusTooManyRequests || isRateLimitError(errMsg) {
 			providers.LogError(ctx, errMsg, "rate_limit", "extract non-200 response")
 			return nil, fmt.Errorf("rate limit exceeded: %s", errMsg)
 		}
@@ -463,12 +482,11 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 	var content, title string
 	var metadata map[string]interface{}
 
-	// Check if response is actually JSON
+	// With Accept: application/json, the response wraps data in {code, status, data: {...}}.
 	contentType := resp.Header.Get("Content-Type")
 	if isJSONContent(contentType) {
 		var result readerResponse
 		if err := json.Unmarshal(respBody, &result); err != nil {
-			// Check if body is plain text error
 			textBody := strings.TrimSpace(string(respBody))
 			if isRateLimitError(textBody) {
 				providers.LogError(ctx, textBody, "rate_limit", "extract parse response")
@@ -477,14 +495,16 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 			providers.LogError(ctx, err.Error(), "parse", "extract unmarshal failed")
 			return nil, fmt.Errorf("failed to unmarshal response: %w (body: %s)", err, truncateString(textBody, 200))
 		}
-		content = result.Content
-		title = result.Title
+		content = result.Data.Content
+		title = result.Data.Title
 		metadata = map[string]interface{}{
-			"url":       result.URL,
-			"timestamp": result.Timestamp,
+			"url": result.Data.URL,
+		}
+		if result.Data.Timestamp != "" {
+			metadata["timestamp"] = result.Data.Timestamp
 		}
 	} else {
-		// Plain text response
+		// Plain text response (fallback without Accept header)
 		content = string(respBody)
 		title = extractTitle(content)
 		metadata = extractMetadata(content)
@@ -784,6 +804,9 @@ func (c *Client) parsePlainTextSearchResponse(query, text string, startTime time
 	}
 
 	creditsUsed := tokenEstimateFromString(text)
+	if creditsUsed < minSearchTokens {
+		creditsUsed = minSearchTokens
+	}
 
 	return &providers.SearchResult{
 		Query:        query,
@@ -884,6 +907,13 @@ func extractTitleFromMarkdown(content string) string {
 	return ""
 }
 
+// Request types
+
+type searchRequest struct {
+	Query      string `json:"q"`
+	NumResults int    `json:"num_results,omitempty"`
+}
+
 // Response types
 
 type searchResponse struct {
@@ -895,7 +925,15 @@ type searchResponse struct {
 	} `json:"data"`
 }
 
+// readerResponse matches the official Jina Reader JSON response format:
+// {"code": 200, "status": 20000, "data": {"url": "...", "title": "...", "content": "...", ...}}
 type readerResponse struct {
+	Code   int            `json:"code"`
+	Status int            `json:"status"`
+	Data   readerDataItem `json:"data"`
+}
+
+type readerDataItem struct {
 	URL       string `json:"url"`
 	Title     string `json:"title"`
 	Content   string `json:"content"`

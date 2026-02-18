@@ -2,6 +2,7 @@ package jina
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -15,6 +16,20 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func newJSONResponse(statusCode int, body string, req *http.Request) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+		Status:     http.StatusText(statusCode),
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+	}
 }
 
 func newTextResponse(statusCode int, body string, req *http.Request) *http.Response {
@@ -112,24 +127,32 @@ func TestNewClient_SearchTimeoutOverride(t *testing.T) {
 	}
 }
 
-func TestSearch_NoContentModeHeadersAndParsing(t *testing.T) {
-	var gotAuth, gotRespondWith, gotRetainImages, gotQuery string
+func TestSearch_PostRequestWithJSONResponse(t *testing.T) {
+	var gotMethod, gotAuth, gotAccept, gotContentType, gotRespondWith, gotRetainImages string
+	var gotBody searchRequest
 	clientHTTP := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			gotMethod = r.Method
 			gotAuth = r.Header.Get("Authorization")
+			gotAccept = r.Header.Get("Accept")
+			gotContentType = r.Header.Get("Content-Type")
 			gotRespondWith = r.Header.Get("X-Respond-With")
 			gotRetainImages = r.Header.Get("X-Retain-Images")
-			gotQuery = r.URL.Query().Get("q")
+			json.NewDecoder(r.Body).Decode(&gotBody)
 
-			return newTextResponse(http.StatusOK, strings.Join([]string{
-				"[1] Title: Paris",
-				"[1] URL Source: https://en.wikipedia.org/wiki/Paris",
-				"[1] Description: Capital of France",
-				"",
-				"[2] Title: France Population",
-				"[2] URL Source: https://www.worldometers.info/world-population/france-population/",
-				"[2] Description: Latest population stats",
-			}, "\n"), r), nil
+			resp := searchResponse{
+				Code: 200,
+				Data: []struct {
+					Title   string `json:"title"`
+					URL     string `json:"url"`
+					Content string `json:"content"`
+				}{
+					{Title: "Paris", URL: "https://en.wikipedia.org/wiki/Paris", Content: "Capital of France"},
+					{Title: "France Population", URL: "https://www.worldometers.info/world-population/france-population/", Content: "Latest population stats"},
+				},
+			}
+			respJSON, _ := json.Marshal(resp)
+			return newJSONResponse(http.StatusOK, string(respJSON), r), nil
 		}),
 	}
 
@@ -148,8 +171,17 @@ func TestSearch_NoContentModeHeadersAndParsing(t *testing.T) {
 		t.Fatalf("Search() error = %v", err)
 	}
 
+	if gotMethod != "POST" {
+		t.Fatalf("expected POST request, got %s", gotMethod)
+	}
 	if gotAuth == "" {
 		t.Fatal("expected Authorization header to be set")
+	}
+	if gotAccept != "application/json" {
+		t.Fatalf("expected Accept=application/json, got %q", gotAccept)
+	}
+	if gotContentType != "application/json" {
+		t.Fatalf("expected Content-Type=application/json, got %q", gotContentType)
 	}
 	if gotRespondWith != "no-content" {
 		t.Fatalf("expected X-Respond-With=no-content, got %q", gotRespondWith)
@@ -157,8 +189,8 @@ func TestSearch_NoContentModeHeadersAndParsing(t *testing.T) {
 	if gotRetainImages != "none" {
 		t.Fatalf("expected X-Retain-Images=none, got %q", gotRetainImages)
 	}
-	if gotQuery != "capital of france population" {
-		t.Fatalf("unexpected query value %q", gotQuery)
+	if gotBody.Query != "capital of france population" {
+		t.Fatalf("unexpected query value %q", gotBody.Query)
 	}
 	if result.TotalResults != 2 {
 		t.Fatalf("expected 2 results, got %d", result.TotalResults)
@@ -166,17 +198,72 @@ func TestSearch_NoContentModeHeadersAndParsing(t *testing.T) {
 	if result.Results[0].Title != "Paris" {
 		t.Fatalf("expected first title Paris, got %q", result.Results[0].Title)
 	}
-	if result.CreditsUsed <= 0 {
-		t.Fatalf("expected positive token estimate, got %d", result.CreditsUsed)
+	if result.CreditsUsed < minSearchTokens {
+		t.Fatalf("expected at least %d tokens (min search), got %d", minSearchTokens, result.CreditsUsed)
 	}
 }
 
-func TestExtract_UsesTokenBudgetHeader(t *testing.T) {
-	var gotTokenBudget, gotRetainImages string
+func TestExtract_JSONResponseWithWrappedData(t *testing.T) {
+	var gotAccept, gotTokenBudget, gotRetainImages string
 	clientHTTP := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			gotAccept = r.Header.Get("Accept")
 			gotTokenBudget = r.Header.Get("X-Token-Budget")
 			gotRetainImages = r.Header.Get("X-Retain-Images")
+
+			resp := readerResponse{
+				Code:   200,
+				Status: 20000,
+				Data: readerDataItem{
+					URL:       "https://example.com",
+					Title:     "Sample Page",
+					Content:   "# Heading\nHello world",
+					Timestamp: "2025-01-01T00:00:00Z",
+				},
+			}
+			respJSON, _ := json.Marshal(resp)
+			return newJSONResponse(http.StatusOK, string(respJSON), r), nil
+		}),
+	}
+
+	client := &Client{
+		httpClient:      clientHTTP,
+		readerBaseURL:   "https://r.jina.ai",
+		extractBudget:   1234,
+		extractRetryCfg: providers.RetryConfig{MaxRetries: 0},
+	}
+
+	result, err := client.Extract(context.Background(), "https://example.com", providers.DefaultExtractOptions())
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+
+	if gotAccept != "application/json" {
+		t.Fatalf("expected Accept=application/json, got %q", gotAccept)
+	}
+	if gotTokenBudget != "1234" {
+		t.Fatalf("expected X-Token-Budget=1234, got %q", gotTokenBudget)
+	}
+	if gotRetainImages != "none" {
+		t.Fatalf("expected X-Retain-Images=none, got %q", gotRetainImages)
+	}
+	if result.Title != "Sample Page" {
+		t.Fatalf("expected title Sample Page, got %q", result.Title)
+	}
+	if result.Content != "# Heading\nHello world" {
+		t.Fatalf("expected content from data wrapper, got %q", result.Content)
+	}
+	if result.Metadata["url"] != "https://example.com" {
+		t.Fatalf("expected metadata url=https://example.com, got %v", result.Metadata["url"])
+	}
+	if result.CreditsUsed != tokenEstimateFromString(result.Content) {
+		t.Fatalf("expected credits to match token estimate, got %d", result.CreditsUsed)
+	}
+}
+
+func TestExtract_PlainTextFallback(t *testing.T) {
+	clientHTTP := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			return newTextResponse(http.StatusOK, strings.Join([]string{
 				"Title: Sample Page",
 				"URL Source: https://example.com",
@@ -200,20 +287,8 @@ func TestExtract_UsesTokenBudgetHeader(t *testing.T) {
 		t.Fatalf("Extract() error = %v", err)
 	}
 
-	if gotTokenBudget != "1234" {
-		t.Fatalf("expected X-Token-Budget=1234, got %q", gotTokenBudget)
-	}
-	if gotRetainImages != "none" {
-		t.Fatalf("expected X-Retain-Images=none, got %q", gotRetainImages)
-	}
 	if result.Title != "Sample Page" {
 		t.Fatalf("expected title Sample Page, got %q", result.Title)
-	}
-	if result.Metadata["url"] != "https://example.com" {
-		t.Fatalf("expected metadata url=https://example.com, got %v", result.Metadata["url"])
-	}
-	if result.CreditsUsed != tokenEstimateFromString(result.Content) {
-		t.Fatalf("expected credits to match token estimate, got %d", result.CreditsUsed)
 	}
 }
 
@@ -222,7 +297,17 @@ func TestCrawl_UsesCrawlTokenBudget(t *testing.T) {
 	clientHTTP := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			gotTokenBudget = r.Header.Get("X-Token-Budget")
-			return newTextResponse(http.StatusOK, "Title: Crawl Page\nMarkdown Content:\nhello", r), nil
+			resp := readerResponse{
+				Code:   200,
+				Status: 20000,
+				Data: readerDataItem{
+					URL:     "https://example.com",
+					Title:   "Crawl Page",
+					Content: "hello",
+				},
+			}
+			respJSON, _ := json.Marshal(resp)
+			return newJSONResponse(http.StatusOK, string(respJSON), r), nil
 		}),
 	}
 
@@ -276,6 +361,9 @@ func TestParsePlainTextSearchResponse_MultipleResults(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(result.Results[0].Content), "paris") {
 		t.Fatalf("expected first content to include paris, got %q", result.Results[0].Content)
+	}
+	if result.CreditsUsed < minSearchTokens {
+		t.Fatalf("expected at least %d tokens (min search), got %d", minSearchTokens, result.CreditsUsed)
 	}
 }
 

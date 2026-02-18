@@ -42,11 +42,20 @@ func TestSearch_Success(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 
-		// Verify request body
+		// Verify Bearer auth header
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer test-key" {
+			t.Errorf("expected Authorization 'Bearer test-key', got %q", auth)
+		}
+
+		// Verify request body has no api_key
 		var req map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&req)
 		if req["query"] != "test query" {
 			t.Errorf("expected query 'test query', got %v", req["query"])
+		}
+		if _, hasAPIKey := req["api_key"]; hasAPIKey {
+			t.Error("request body should not contain api_key (use Authorization header)")
 		}
 
 		response := searchResponse{
@@ -370,6 +379,19 @@ func TestExtract_Success(t *testing.T) {
 			t.Errorf("expected path /extract, got %s", r.URL.Path)
 		}
 
+		// Verify Bearer auth header
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer test-key" {
+			t.Errorf("expected Authorization 'Bearer test-key', got %q", auth)
+		}
+
+		// Verify no api_key in body
+		var req map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&req)
+		if _, hasAPIKey := req["api_key"]; hasAPIKey {
+			t.Error("request body should not contain api_key (use Authorization header)")
+		}
+
 		response := extractResponse{
 			Results: []struct {
 				URL        string   `json:"url"`
@@ -410,6 +432,40 @@ func TestExtract_Success(t *testing.T) {
 	}
 	if result.Content != "Extracted content here" {
 		t.Errorf("expected content 'Extracted content here', got %s", result.Content)
+	}
+}
+
+func TestExtract_AdvancedCredits(t *testing.T) {
+	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := extractResponse{
+			Results: []struct {
+				URL        string   `json:"url"`
+				Title      string   `json:"title"`
+				RawContent string   `json:"raw_content"`
+				Images     []string `json:"images"`
+			}{
+				{URL: "https://example.com", Title: "Title", RawContent: "Content"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := &Client{
+		apiKey:     "test-key",
+		baseURL:    server.URL,
+		httpClient: &http.Client{Timeout: 60 * time.Second},
+	}
+
+	opts := providers.ExtractOptions{Format: "advanced", IncludeMetadata: true}
+	result, err := client.Extract(context.Background(), "https://example.com", opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.CreditsUsed != 2 {
+		t.Errorf("expected 2 credits for advanced extract, got %d", result.CreditsUsed)
 	}
 }
 
@@ -493,10 +549,15 @@ func TestExtract_PartialFail(t *testing.T) {
 
 func TestCrawl_MapSuccess(t *testing.T) {
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify Bearer auth on all requests
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer test-key" {
+			t.Errorf("expected Authorization 'Bearer test-key', got %q", auth)
+		}
+
 		switch r.URL.Path {
 		case "/map":
 			response := mapResponse{
-				Links:   []string{"https://example.com/page1", "https://example.com/page2"},
 				Results: []string{"https://example.com/page1", "https://example.com/page2"},
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -646,5 +707,13 @@ func TestCrawl_EmptyMap(t *testing.T) {
 	// Should have 1 page from fallback extract
 	if len(result.Pages) != 1 {
 		t.Errorf("expected 1 page from fallback extract, got %d", len(result.Pages))
+	}
+}
+
+func TestCrawl_IsEmulated(t *testing.T) {
+	client := &Client{apiKey: "test-key"}
+	caps := client.Capabilities()
+	if caps.Crawl != providers.SupportEmulated {
+		t.Errorf("expected crawl to be emulated, got %s", caps.Crawl)
 	}
 }

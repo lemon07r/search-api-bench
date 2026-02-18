@@ -90,8 +90,9 @@ func TestSearch_Success(t *testing.T) {
 	if result.Results[0].URL != "https://example.com" {
 		t.Errorf("expected URL 'https://example.com', got %s", result.Results[0].URL)
 	}
-	if result.CreditsUsed != 1 {
-		t.Errorf("expected 1 credit, got %d", result.CreditsUsed)
+	// DefaultSearchOptions uses SearchDepth=advanced: 2 credits base + 1 per scraped page
+	if result.CreditsUsed != 3 {
+		t.Errorf("expected 3 credits (2 base + 1 scraped page), got %d", result.CreditsUsed)
 	}
 }
 
@@ -323,7 +324,7 @@ func TestCrawl_SyncSuccess(t *testing.T) {
 func TestCrawl_NormalizesMaxDepthToSeedURLPathDepth(t *testing.T) {
 	var captured struct {
 		Limit    int `json:"limit"`
-		MaxDepth int `json:"maxDepth"`
+		MaxDepth int `json:"maxDiscoveryDepth"`
 	}
 
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -386,7 +387,7 @@ func TestCrawl_NormalizesMaxDepthToSeedURLPathDepth(t *testing.T) {
 
 func TestCrawl_NormalizesZeroMaxDepthForRootPath(t *testing.T) {
 	var captured struct {
-		MaxDepth int `json:"maxDepth"`
+		MaxDepth int `json:"maxDiscoveryDepth"`
 	}
 
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

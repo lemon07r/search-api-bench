@@ -1,5 +1,7 @@
-// Package firecrawl provides a client for the Firecrawl API.
+// Package firecrawl provides a client for the Firecrawl API (v2).
 // It implements the providers.Provider interface for benchmarking search, extract, and crawl operations.
+//
+// API Documentation: https://docs.firecrawl.dev/api-reference
 package firecrawl
 
 import (
@@ -8,14 +10,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lamim/search-api-bench/internal/providers"
 )
 
 const (
-	defaultBaseURL = "https://api.firecrawl.dev/v1"
+	defaultBaseURL = "https://api.firecrawl.dev/v2"
 )
 
 // Client represents a Firecrawl API client
@@ -62,15 +66,14 @@ func (c *Client) SupportsOperation(opType string) bool {
 	return c.Capabilities().SupportsOperation(opType)
 }
 
-// Search performs a web search using Firecrawl
-// Leverages native capabilities: scrape options, location settings
+// Search performs a web search using Firecrawl v2
+// Endpoint: POST /v2/search
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
 
 	payload := map[string]interface{}{
 		"query": query,
 		"limit": opts.MaxResults,
-		"lang":  "en", // Default to English for consistent results
 	}
 
 	// Advanced search includes full scraping with markdown format
@@ -123,18 +126,25 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		})
 	}
 
+	// Firecrawl search: 2 credits per 10 results + 1 credit per scraped page if scrapeOptions used
+	creditsUsed := 2
+	if opts.SearchDepth == "advanced" {
+		creditsUsed += len(items) // Each scraped page adds 1 credit
+	}
+
 	return &providers.SearchResult{
 		Query:        query,
 		Results:      items,
 		TotalResults: len(items),
 		Latency:      latency,
-		CreditsUsed:  1, // Firecrawl search uses 1 credit per request
+		CreditsUsed:  creditsUsed,
 		RequestCount: 1,
 		RawResponse:  resp.Body,
 	}, nil
 }
 
-// Extract extracts content from a URL using Firecrawl
+// Extract extracts content from a URL using Firecrawl v2
+// Endpoint: POST /v2/scrape
 func (c *Client) Extract(ctx context.Context, url string, opts providers.ExtractOptions) (*providers.ExtractResult, error) {
 	start := time.Now()
 
@@ -195,16 +205,16 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	}, nil
 }
 
-// Crawl crawls a website using Firecrawl
-// Leverages native capabilities: maxDepth, scrape options, exclude paths
+// Crawl crawls a website using Firecrawl v2
+// Endpoint: POST /v2/crawl (async with polling)
 func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
 	maxPages, maxDepth := normalizeCrawlOptions(url, opts)
 
 	payload := map[string]interface{}{
-		"url":      url,
-		"limit":    maxPages,
-		"maxDepth": maxDepth, // Firecrawl supports max depth natively
+		"url":               url,
+		"limit":             maxPages,
+		"maxDiscoveryDepth": maxDepth, // v2 field name
 		"scrapeOptions": map[string]interface{}{
 			"formats": []string{"markdown"},
 		},
@@ -275,7 +285,10 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}, nil
 }
 
-func normalizeCrawlOptions(_ string, opts providers.CrawlOptions) (maxPages int, maxDepth int) {
+// normalizeCrawlOptions adjusts crawl parameters for Firecrawl.
+// When MaxDepth is 0, it computes a reasonable depth from the seed URL's
+// path segments so the crawl covers the subtree under that path.
+func normalizeCrawlOptions(seedURL string, opts providers.CrawlOptions) (maxPages int, maxDepth int) {
 	maxPages = opts.MaxPages
 	if maxPages <= 0 {
 		maxPages = 1
@@ -286,11 +299,35 @@ func normalizeCrawlOptions(_ string, opts providers.CrawlOptions) (maxPages int,
 		maxDepth = 0
 	}
 
+	// When depth is 0, auto-calculate from the seed URL path depth.
+	// A deeper seed URL needs a higher maxDepth to discover sub-pages.
+	if maxDepth == 0 {
+		maxDepth = seedURLPathDepth(seedURL)
+		if maxDepth < 1 {
+			maxDepth = 1
+		}
+	}
+
 	return maxPages, maxDepth
+}
+
+// seedURLPathDepth counts the number of non-empty path segments in a URL.
+func seedURLPathDepth(rawURL string) int {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return 1
+	}
+	path := strings.Trim(u.Path, "/")
+	if path == "" {
+		return 1
+	}
+	return len(strings.Split(path, "/"))
 }
 
 func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Time) (*providers.CrawlResult, error) {
 	checkURL := c.baseURL + "/crawl/" + crawlID
+	var allPages []providers.CrawledPage
+	requestCount := 1 // Initial crawl request
 
 	for {
 		select {
@@ -309,16 +346,16 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 		if err != nil {
 			return nil, fmt.Errorf("status request failed: %w", err)
 		}
+		requestCount++
 
 		var status crawlStatusResponse
 		if err := json.Unmarshal(resp.Body, &status); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal status response: %w", err)
 		}
 
-		// Build result from available data (even partial)
-		pages := make([]providers.CrawledPage, 0, len(status.Data))
+		// Collect pages from this response
 		for _, d := range status.Data {
-			pages = append(pages, providers.CrawledPage{
+			allPages = append(allPages, providers.CrawledPage{
 				URL:      d.Metadata.SourceURL,
 				Title:    d.Metadata.Title,
 				Content:  d.Markdown,
@@ -329,28 +366,39 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 		switch status.Status {
 		case "completed":
 			latency := time.Since(start)
+
+			// Use actual creditsUsed from API response when available
+			creditsUsed := status.CreditsUsed
+			if creditsUsed <= 0 {
+				creditsUsed = len(allPages)
+			}
+
 			return &providers.CrawlResult{
 				URL:           status.URL,
-				Pages:         pages,
-				TotalPages:    len(pages),
+				Pages:         allPages,
+				TotalPages:    len(allPages),
 				Latency:       latency,
-				CreditsUsed:   len(pages),
-				RequestCount:  2,
-				UsageReported: true,
+				CreditsUsed:   creditsUsed,
+				RequestCount:  requestCount,
+				UsageReported: status.CreditsUsed > 0,
 			}, nil
 
 		case "failed", "scraping_failed":
 			// Return partial results if we have any data, otherwise error
-			if len(pages) > 0 {
+			if len(allPages) > 0 {
 				latency := time.Since(start)
+				creditsUsed := status.CreditsUsed
+				if creditsUsed <= 0 {
+					creditsUsed = len(allPages)
+				}
 				return &providers.CrawlResult{
 					URL:           status.URL,
-					Pages:         pages,
-					TotalPages:    len(pages),
+					Pages:         allPages,
+					TotalPages:    len(allPages),
 					Latency:       latency,
-					CreditsUsed:   len(pages),
-					RequestCount:  2,
-					UsageReported: true,
+					CreditsUsed:   creditsUsed,
+					RequestCount:  requestCount,
+					UsageReported: status.CreditsUsed > 0,
 				}, nil
 			}
 			errMsg := status.Error
@@ -363,13 +411,18 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 			return nil, fmt.Errorf("crawl was cancelled")
 
 		default:
+			// Handle v2 pagination: if there's a next URL, follow it
+			if status.Next != "" {
+				checkURL = status.Next
+			}
 			// Continue polling for: scraping, scheduled, etc.
 			continue
 		}
 	}
 }
 
-// Response types
+// Response types for Firecrawl v2 API
+
 type searchResponse struct {
 	Success bool `json:"success"`
 	Data    []struct {
@@ -407,10 +460,12 @@ type crawlResponse struct {
 }
 
 type crawlStatusResponse struct {
-	Status string `json:"status"`
-	URL    string `json:"url"`
-	Error  string `json:"error,omitempty"`
-	Data   []struct {
+	Status      string `json:"status"`
+	URL         string `json:"url"`
+	Error       string `json:"error,omitempty"`
+	Next        string `json:"next,omitempty"`        // v2 pagination URL
+	CreditsUsed int    `json:"creditsUsed,omitempty"` // v2 actual credit usage
+	Data        []struct {
 		Markdown string `json:"markdown"`
 		Metadata struct {
 			Title     string `json:"title"`

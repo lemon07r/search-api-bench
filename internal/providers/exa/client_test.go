@@ -11,7 +11,7 @@ import (
 	"github.com/lamim/search-api-bench/internal/providers/testutil"
 )
 
-func TestSearch_UsesContextFallbackWhenResultTextMissing(t *testing.T) {
+func TestSearch_ReturnsInlineTextContent(t *testing.T) {
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {
 			t.Fatalf("expected /search path, got %s", r.URL.Path)
@@ -22,23 +22,20 @@ func TestSearch_UsesContextFallbackWhenResultTextMissing(t *testing.T) {
 
 		resp := searchResponse{
 			RequestID: "req-1",
-			Context: "Title: Paris Population 2026\n" +
-				"URL: https://worldpopulationreview.com/cities/france/paris\n" +
-				"Summary: The estimated population is 11,418,300.\n\n" +
-				"Title: Demographics of Paris\n" +
-				"URL: https://en.wikipedia.org/wiki/Demographics_of_Paris\n" +
-				"Summary: The city had 2.1 million inhabitants.",
 			Results: []exaSearchHit{
 				{
 					Title:         "Paris Population 2026",
 					URL:           "https://worldpopulationreview.com/cities/france/paris",
+					Text:          "The estimated population is 11,418,300.",
 					PublishedDate: "2025-01-01T00:00:00.000Z",
 				},
 				{
 					Title: "Demographics of Paris",
 					URL:   "https://en.wikipedia.org/wiki/Demographics_of_Paris",
+					Text:  "The city had 2.1 million inhabitants.",
 				},
 			},
+			CostDollars: costDollars{Total: 0.006},
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -63,10 +60,10 @@ func TestSearch_UsesContextFallbackWhenResultTextMissing(t *testing.T) {
 		t.Fatalf("expected 2 results, got %d", len(result.Results))
 	}
 	if result.Results[0].Content == "" {
-		t.Fatal("expected first result content from context fallback")
+		t.Fatal("expected first result content from inline text")
 	}
 	if result.Results[1].Content == "" {
-		t.Fatal("expected second result content from context fallback")
+		t.Fatal("expected second result content from inline text")
 	}
 	if result.Results[0].PublishedAt == nil || result.Results[0].PublishedAt.Year() != 2025 {
 		t.Fatalf("expected RFC3339 published date to parse, got %+v", result.Results[0].PublishedAt)
