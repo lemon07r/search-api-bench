@@ -78,6 +78,11 @@ JINA_EXTRACT_TOKEN_BUDGET=6000
 JINA_CRAWL_TOKEN_BUDGET=6000
 JINA_WITH_GENERATED_ALT=false
 
+# Firecrawl rate limiting (requests per minute)
+# Default: 5 (conservative for free tier's 6 req/min ceiling)
+# Set higher for paid plans, or 0 to disable.
+FIRECRAWL_RATE_LIMIT=5
+
 # Optional scoring diagnostics
 EMBEDDING_MODEL_BASE_URL=https://api.provider.com/v1
 EMBEDDING_MODEL_API_KEY=your_key
