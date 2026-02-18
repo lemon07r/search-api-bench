@@ -42,29 +42,22 @@ func TestSearch_Success(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 
-		response := searchResponse{
-			Success: true,
-			Data: []struct {
-				Markdown string `json:"markdown"`
-				Metadata struct {
-					Title     string `json:"title"`
-					SourceURL string `json:"sourceURL"`
-				} `json:"metadata"`
-			}{
-				{
-					Markdown: "Test content",
-					Metadata: struct {
-						Title     string `json:"title"`
-						SourceURL string `json:"sourceURL"`
-					}{
-						Title:     "Test Title",
-						SourceURL: "https://example.com",
-					},
-				},
-			},
-		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		w.Write([]byte(`{
+			"success": true,
+			"creditsUsed": 3,
+			"data": {
+				"web": [
+					{
+						"markdown": "Test content",
+						"metadata": {
+							"title": "Test Title",
+							"sourceURL": "https://example.com"
+						}
+					}
+				]
+			}
+		}`))
 	}))
 	defer server.Close()
 
@@ -90,9 +83,12 @@ func TestSearch_Success(t *testing.T) {
 	if result.Results[0].URL != "https://example.com" {
 		t.Errorf("expected URL 'https://example.com', got %s", result.Results[0].URL)
 	}
-	// DefaultSearchOptions uses SearchDepth=advanced: 2 credits base + 1 per scraped page
+	// API returned creditsUsed=3
 	if result.CreditsUsed != 3 {
-		t.Errorf("expected 3 credits (2 base + 1 scraped page), got %d", result.CreditsUsed)
+		t.Errorf("expected 3 credits from API response, got %d", result.CreditsUsed)
+	}
+	if !result.UsageReported {
+		t.Errorf("expected UsageReported=true when API returns creditsUsed")
 	}
 }
 
@@ -140,18 +136,8 @@ func TestSearch_InvalidJSON(t *testing.T) {
 
 func TestSearch_EmptyResults(t *testing.T) {
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := searchResponse{
-			Success: true,
-			Data: []struct {
-				Markdown string `json:"markdown"`
-				Metadata struct {
-					Title     string `json:"title"`
-					SourceURL string `json:"sourceURL"`
-				} `json:"metadata"`
-			}{},
-		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		w.Write([]byte(`{"success": true, "data": {"web": []}}`))
 	}))
 	defer server.Close()
 

@@ -42,6 +42,7 @@ type cliFlags struct {
 	noSearch         *bool
 	noLocal          *bool
 	qualityMode      *bool
+	includeJina      *bool
 }
 
 func parseFlags() *cliFlags {
@@ -60,6 +61,7 @@ func parseFlags() *cliFlags {
 		noSearch:         flag.Bool("no-search", false, "Exclude search tests"),
 		noLocal:          flag.Bool("no-local", false, "Exclude local provider"),
 		qualityMode:      flag.Bool("quality", false, "Enable relevance/scoring metrics (search model-assisted + extract/crawl heuristics; requires EMBEDDING_* and RERANKER_* env vars)"),
+		includeJina:      flag.Bool("jina", false, "Include Jina provider (excluded by default due to high cost and slow search)"),
 	}
 }
 
@@ -88,7 +90,7 @@ func main() {
 
 	loadEnvFile()
 
-	providerNames, err := parseProviders(*flags.providersFlag, *flags.noLocal)
+	providerNames, err := parseProviders(*flags.providersFlag, *flags.noLocal, *flags.includeJina)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing providers: %v\n", err)
 		os.Exit(1)
@@ -238,7 +240,8 @@ func printBanner() {
 	fmt.Println(`
 ╔══════════════════════════════════════════════════════════════╗
 ║               Search API Benchmark Tool                      ║
-║    Compare Firecrawl, Tavily, Brave, Exa, Mixedbread, Jina   ║
+║    Compare Firecrawl, Tavily, Brave, Exa, Mixedbread         ║
+║    (Jina available with -jina flag)                           ║
 ╚══════════════════════════════════════════════════════════════╝`)
 	fmt.Println()
 }
@@ -419,8 +422,9 @@ func initializeQualityScorer() (*quality.Scorer, error) {
 	return scorer, nil
 }
 
-func parseProviders(s string, noLocal bool) ([]string, error) {
-	allProviders := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
+func parseProviders(s string, noLocal bool, includeJina bool) ([]string, error) {
+	// Default providers excludes Jina (opt-in only due to high cost).
+	defaultProviders := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread"}
 	validProviders := map[string]struct{}{
 		"firecrawl":  {},
 		"tavily":     {},
@@ -430,15 +434,19 @@ func parseProviders(s string, noLocal bool) ([]string, error) {
 		"mixedbread": {},
 		"jina":       {},
 	}
+	allNames := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
 
 	input := strings.ToLower(strings.TrimSpace(s))
 	if input == "" {
-		return nil, fmt.Errorf("providers cannot be empty (valid values: all, %s)", strings.Join(allProviders, ", "))
+		return nil, fmt.Errorf("providers cannot be empty (valid values: all, %s)", strings.Join(allNames, ", "))
 	}
 
 	var selected []string
 	if input == "all" {
-		selected = append(selected, allProviders...)
+		selected = append(selected, defaultProviders...)
+		if includeJina {
+			selected = append(selected, "jina")
+		}
 	} else {
 		seen := make(map[string]struct{})
 		var invalid []string
@@ -458,7 +466,7 @@ func parseProviders(s string, noLocal bool) ([]string, error) {
 			selected = append(selected, p)
 		}
 		if len(invalid) > 0 {
-			return nil, fmt.Errorf("invalid provider(s): %s (valid values: all, %s)", strings.Join(invalid, ", "), strings.Join(allProviders, ", "))
+			return nil, fmt.Errorf("invalid provider(s): %s (valid values: all, %s)", strings.Join(invalid, ", "), strings.Join(allNames, ", "))
 		}
 	}
 
@@ -577,7 +585,7 @@ func applyQuickMode(cfg *config.Config) *config.Config {
 	quickCfg := &config.Config{
 		General: config.GeneralConfig{
 			Concurrency: cfg.General.Concurrency,
-			Timeout:     "30s", // Increased from 20s to accommodate slower providers like Jina
+			Timeout:     "30s",
 			OutputDir:   cfg.General.OutputDir,
 		},
 		Tests: []config.TestConfig{},

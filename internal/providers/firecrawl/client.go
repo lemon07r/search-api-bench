@@ -79,7 +79,9 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	// Advanced search includes full scraping with markdown format
 	if opts.SearchDepth == "advanced" {
 		payload["scrapeOptions"] = map[string]interface{}{
-			"formats": []string{"markdown"},
+			"formats": []interface{}{
+				map[string]interface{}{"type": "markdown"},
+			},
 		}
 	}
 
@@ -117,8 +119,8 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	latency := time.Since(start)
 	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
-	items := make([]providers.SearchItem, 0, len(result.Data))
-	for _, d := range result.Data {
+	items := make([]providers.SearchItem, 0, len(result.Data.Web))
+	for _, d := range result.Data.Web {
 		items = append(items, providers.SearchItem{
 			Title:   d.Metadata.Title,
 			URL:     d.Metadata.SourceURL,
@@ -126,20 +128,25 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		})
 	}
 
-	// Firecrawl search: 2 credits per 10 results + 1 credit per scraped page if scrapeOptions used
-	creditsUsed := 2
-	if opts.SearchDepth == "advanced" {
-		creditsUsed += len(items) // Each scraped page adds 1 credit
+	// Use actual creditsUsed from API response when available, otherwise estimate.
+	// Firecrawl search: 2 credits per 10 results + 1 credit per scraped page if scrapeOptions used.
+	creditsUsed := result.CreditsUsed
+	if creditsUsed <= 0 {
+		creditsUsed = 2
+		if opts.SearchDepth == "advanced" {
+			creditsUsed += len(items)
+		}
 	}
 
 	return &providers.SearchResult{
-		Query:        query,
-		Results:      items,
-		TotalResults: len(items),
-		Latency:      latency,
-		CreditsUsed:  creditsUsed,
-		RequestCount: 1,
-		RawResponse:  resp.Body,
+		Query:         query,
+		Results:       items,
+		TotalResults:  len(items),
+		Latency:       latency,
+		CreditsUsed:   creditsUsed,
+		RequestCount:  1,
+		UsageReported: result.CreditsUsed > 0,
+		RawResponse:   resp.Body,
 	}, nil
 }
 
@@ -149,8 +156,10 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	start := time.Now()
 
 	payload := map[string]interface{}{
-		"url":     url,
-		"formats": []string{"markdown"},
+		"url": url,
+		"formats": []interface{}{
+			map[string]interface{}{"type": "markdown"},
+		},
 	}
 
 	if opts.IncludeMetadata {
@@ -216,7 +225,9 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 		"limit":             maxPages,
 		"maxDiscoveryDepth": maxDepth, // v2 field name
 		"scrapeOptions": map[string]interface{}{
-			"formats": []string{"markdown"},
+			"formats": []interface{}{
+				map[string]interface{}{"type": "markdown"},
+			},
 		},
 	}
 
@@ -424,13 +435,16 @@ func (c *Client) waitForCrawl(ctx context.Context, crawlID string, start time.Ti
 // Response types for Firecrawl v2 API
 
 type searchResponse struct {
-	Success bool `json:"success"`
-	Data    []struct {
-		Markdown string `json:"markdown"`
-		Metadata struct {
-			Title     string `json:"title"`
-			SourceURL string `json:"sourceURL"`
-		} `json:"metadata"`
+	Success     bool `json:"success"`
+	CreditsUsed int  `json:"creditsUsed,omitempty"`
+	Data        struct {
+		Web []struct {
+			Markdown string `json:"markdown"`
+			Metadata struct {
+				Title     string `json:"title"`
+				SourceURL string `json:"sourceURL"`
+			} `json:"metadata"`
+		} `json:"web"`
 	} `json:"data"`
 }
 
