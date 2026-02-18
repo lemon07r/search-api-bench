@@ -3,6 +3,7 @@ package report
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -245,11 +246,23 @@ func (g *Generator) generateQualityByTestTypeSection() string {
                         <td>%s</td>
                         <td>%s</td>
                         <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
+                        <td>%s</td>
                     </tr>`,
 			provider,
 			capitalize(provider),
 			formatQualityValue(byType.Search),
 			formatQualityCoverage(byType.Search),
+			formatQualityValue(byType.SearchSemantic),
+			formatQualityCoverage(byType.SearchSemantic),
+			formatQualityValue(byType.SearchReranker),
+			formatQualityCoverage(byType.SearchReranker),
+			formatQualityValue(byType.SearchComponentAvg),
+			formatQualityCoverage(byType.SearchComponentAvg),
 			formatQualityValue(byType.Extract),
 			formatQualityCoverage(byType.Extract),
 			formatQualityValue(byType.Crawl),
@@ -267,6 +280,12 @@ func (g *Generator) generateQualityByTestTypeSection() string {
                         <th>Provider</th>
                         <th>Search Relevance</th>
                         <th>Search Coverage</th>
+                        <th>Semantic</th>
+                        <th>Semantic Coverage</th>
+                        <th>Reranker</th>
+                        <th>Reranker Coverage</th>
+                        <th>Search Component Avg</th>
+                        <th>Component Coverage</th>
                         <th>Extract Heuristic</th>
                         <th>Extract Coverage</th>
                         <th>Crawl Heuristic</th>
@@ -421,6 +440,9 @@ func (g *Generator) generateChartScripts() string {
 	}
 
 	showQuality := g.hasQualityScores()
+	semScores := make([]float64, len(providers))
+	rerScores := make([]float64, len(providers))
+	hasSemanticReranker := false
 
 	for i, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
@@ -433,6 +455,41 @@ func (g *Generator) generateChartScripts() string {
 		crawlHeuristicScores[i] = byType.Crawl.AvgQuality
 		// USD cost metrics
 		totalCostUSD[i] = summary.TotalCostUSD
+	}
+	if showQuality {
+		srData, hasSR := g.computeSemanticRerankerScores(providers)
+		hasSemanticReranker = hasSR
+		if hasSR {
+			for i, d := range srData {
+				semScores[i] = d.AvgSemantic
+				rerScores[i] = d.AvgReranker
+			}
+		}
+	}
+
+	latencyBounds := calcPaddedBounds(avgLatencies, 0.25, 100)
+	latencyBounds.Min = math.Max(0, latencyBounds.Min)
+
+	costBounds := calcPaddedBounds(totalCostUSD, 0.25, 0.0005)
+	costBounds.Min = math.Max(0, costBounds.Min)
+
+	successBounds := axisBounds{Min: 0, Max: 100}
+	if !hasMeaningfulSpread(successRates, 20) {
+		successBounds = clampAxisBounds(calcPaddedBounds(successRates, 0.25, 5), 0, 100)
+	}
+
+	qualityBounds := axisBounds{Min: 0, Max: 100}
+	if showQuality {
+		qualityBounds = clampAxisBounds(
+			calcPaddedBounds(combineFloatSlices(searchRelevanceScores, extractHeuristicScores, crawlHeuristicScores), 0.2, 5),
+			0,
+			100,
+		)
+	}
+
+	semanticRerankerBounds := axisBounds{Min: 0, Max: 100}
+	if hasSemanticReranker {
+		semanticRerankerBounds = clampAxisBounds(calcPaddedBounds(combineFloatSlices(semScores, rerScores), 0.2, 5), 0, 100)
 	}
 
 	scoreChartScript := ""
@@ -473,27 +530,19 @@ func (g *Generator) generateChartScripts() string {
                 },
                 scales: {
                     y: {
-                        beginAtZero: true,
-                        max: 100,
+                        min: %.2f,
+                        max: %.2f,
                         title: { display: true, text: 'Score' }
                     }
                 }
             }
         });
-`, joinStrings(providerNames), formatFloatSlice(searchRelevanceScores), joinStrings(colors), formatFloatSlice(extractHeuristicScores), formatFloatSlice(crawlHeuristicScores))
+`, joinStrings(providerNames), formatFloatSlice(searchRelevanceScores), joinStrings(colors), formatFloatSlice(extractHeuristicScores), formatFloatSlice(crawlHeuristicScores), qualityBounds.Min, qualityBounds.Max)
 	}
 
 	semanticRerankerScript := ""
-	if showQuality {
-		srData, hasSR := g.computeSemanticRerankerScores(providers)
-		if hasSR {
-			semScores := make([]float64, len(providers))
-			rerScores := make([]float64, len(providers))
-			for i, d := range srData {
-				semScores[i] = d.AvgSemantic
-				rerScores[i] = d.AvgReranker
-			}
-			semanticRerankerScript = fmt.Sprintf(`
+	if hasSemanticReranker {
+		semanticRerankerScript = fmt.Sprintf(`
         // Semantic & Reranker Score Chart
         new Chart(document.getElementById('semanticRerankerChart'), {
             type: 'bar',
@@ -523,15 +572,14 @@ func (g *Generator) generateChartScripts() string {
                 },
                 scales: {
                     y: {
-                        beginAtZero: true,
-                        max: 100,
+                        min: %.2f,
+                        max: %.2f,
                         title: { display: true, text: 'Score (0-100)' }
                     }
                 }
             }
         });
-`, joinStrings(providerNames), formatFloatSlice(semScores), formatFloatSlice(rerScores))
-		}
+`, joinStrings(providerNames), formatFloatSlice(semScores), formatFloatSlice(rerScores), semanticRerankerBounds.Min, semanticRerankerBounds.Max)
 	}
 
 	advancedScripts := g.generateAdvancedChartScripts(providers, providerNames, colors, baseColors)
@@ -557,7 +605,11 @@ func (g *Generator) generateChartScripts() string {
                     title: { display: true, text: 'Average Response Time' }
                 },
                 scales: {
-                    y: { beginAtZero: true, title: { display: true, text: 'Milliseconds' } }
+                    y: {
+                        min: %.2f,
+                        max: %.2f,
+                        title: { display: true, text: 'Milliseconds' }
+                    }
                 }
             }
         });
@@ -583,8 +635,8 @@ func (g *Generator) generateChartScripts() string {
                 },
                 scales: {
                     y: {
-                        beginAtZero: true,
-                        max: 100,
+                        min: %.2f,
+                        max: %.2f,
                         title: { display: true, text: 'Percentage' }
                     }
                 }
@@ -612,11 +664,14 @@ func (g *Generator) generateChartScripts() string {
                 },
                 scales: {
                     y: { 
-                        beginAtZero: true, 
+                        min: %.6f,
+                        max: %.6f,
                         title: { display: true, text: 'USD ($)' },
                         ticks: {
                             callback: function(value) {
-                                return '$' + value.toFixed(4);
+                                const abs = Math.abs(Number(value));
+                                const digits = abs < 0.001 ? 5 : (abs < 0.01 ? 4 : 3);
+                                return '$' + Number(value).toFixed(digits);
                             }
                         }
                     }
@@ -624,9 +679,9 @@ func (g *Generator) generateChartScripts() string {
             }
         });
 
-%s`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors),
-		joinStrings(providerNames), formatFloatSlice(totalCostUSD), joinStrings(colors),
+%s`, joinStrings(providerNames), formatFloatSlice(avgLatencies), joinStrings(colors), latencyBounds.Min, latencyBounds.Max,
+		joinStrings(providerNames), formatFloatSlice(successRates), joinStrings(colors), successBounds.Min, successBounds.Max,
+		joinStrings(providerNames), formatFloatSlice(totalCostUSD), joinStrings(colors), costBounds.Min, costBounds.Max,
 		advancedScripts)
 }
 
@@ -643,10 +698,27 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 	errorData := g.prepareErrorBreakdownData(providers)
 	heatmapData := g.prepareHeatmapData(providers)
 	showQuality := g.hasQualityScores()
+	radarLabels := "'Success Rate', 'Speed Score', 'Cost Efficiency', 'Content Volume'"
+	if showQuality {
+		radarLabels += ", 'Search Relevance'"
+	}
 
 	// Build radar datasets
 	radarDatasets := ""
+	radarHasData := false
 	for i, p := range providers {
+		series := []float64{
+			radars[i].SuccessRate,
+			radars[i].SpeedScore,
+			radars[i].CostEfficiency,
+			radars[i].ContentScore,
+		}
+		if showQuality {
+			series = append(series, radars[i].SearchRelevanceScore)
+		}
+		if hasAnyPositive(series) {
+			radarHasData = true
+		}
 		radarDatasets += fmt.Sprintf(`{
                     label: '%s',
                     data: [%s],
@@ -658,12 +730,64 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     pointHoverBorderColor: %s,
                     borderWidth: 2
                 },`, capitalize(p),
-			formatFloatSlice([]float64{radars[i].SuccessRate, radars[i].SpeedScore, radars[i].CostEfficiency, radars[i].ContentScore, radars[i].SearchRelevanceScore}),
+			formatFloatSlice(series),
 			baseColors[i%len(baseColors)], baseColors[i%len(baseColors)], baseColors[i%len(baseColors)], baseColors[i%len(baseColors)])
 	}
 	radarDatasets = strings.TrimSuffix(radarDatasets, ",")
 
-	// Latency distribution data prepared (used in chart script via latencyDists)
+	// Build latency chart datasets. If ranges collapse to zero, fall back to average latency bars.
+	minP50Ranges := latencyDistsToMinP50(latencyDists)
+	p50P95Ranges := latencyDistsToP50P95(latencyDists)
+	p95MaxRanges := latencyDistsToP95Max(latencyDists)
+	avgLatency := latencyDistsToAvg(latencyDists)
+	latencyRangesHasData := hasAnyPositive(minP50Ranges) || hasAnyPositive(p50P95Ranges) || hasAnyPositive(p95MaxRanges)
+	latencyHasAnyData := latencyRangesHasData || hasAnyPositive(avgLatency)
+	latencyChartTitle := "Latency Distribution: Min, P50, P95, Max (ms)"
+	latencyDatasets := fmt.Sprintf(`[
+                    {
+                        label: 'Min-P50 Range',
+                        data: [%s],
+                        backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'P50-P95 Range',
+                        data: [%s],
+                        backgroundColor: 'rgba(46, 204, 113, 0.8)',
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'P95-Max Range',
+                        data: [%s],
+                        backgroundColor: 'rgba(231, 76, 60, 0.8)',
+                        borderRadius: 4
+                    }
+                ]`, formatFloatSlice(minP50Ranges), formatFloatSlice(p50P95Ranges), formatFloatSlice(p95MaxRanges))
+	latencyRangesPayload := g.formatLatencyRanges(latencyDists)
+	latencyXStacked := "true"
+	latencyYStacked := "true"
+	latencyYBounds := calcPaddedBounds(latencyDistsToMax(latencyDists), 0.2, 100)
+	latencyYBounds.Min = math.Max(0, latencyYBounds.Min)
+	if !latencyRangesHasData {
+		latencyChartTitle = "Latency Distribution (Fallback to Average Latency)"
+		latencyDatasets = fmt.Sprintf(`[
+                    {
+                        label: 'Average Latency',
+                        data: [%s],
+                        backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                        borderRadius: 4
+                    }
+                ]`, formatFloatSlice(avgLatency))
+		latencyRangesPayload = "[]"
+		latencyXStacked = "false"
+		latencyYStacked = "false"
+		latencyYBounds = calcPaddedBounds(avgLatency, 0.25, 100)
+		latencyYBounds.Min = math.Max(0, latencyYBounds.Min)
+	}
+	latencyEmptyMessage := ""
+	if !latencyHasAnyData {
+		latencyEmptyMessage = "No latency data available for this run"
+	}
 
 	// Build scatter datasets (one per provider)
 	scatterDatasets := ""
@@ -715,97 +839,64 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 
 	// Build error breakdown datasets
 	errorDatasets := g.buildErrorDatasets(providers, errorData, baseColors)
+	errorHasData := strings.TrimSpace(errorDatasets) != ""
+	if !errorHasData {
+		zeros := make([]int, len(providers))
+		errorDatasets = fmt.Sprintf(`{
+                    label: 'No Errors',
+                    data: [%s],
+                    backgroundColor: 'rgba(189, 195, 199, 0.45)',
+                    borderRadius: 4
+                }`, formatIntSlice(zeros))
+	}
 
 	// Heatmap generation
 	heatmapScript := g.generateHeatmapScript(providers, heatmapData)
 
 	// Compute quadrant midpoints (median of each axis)
 	costMid, speedMid, relevanceMid := computeQuadrantMidpoints(scatterData)
-
-	searchRelevanceRadarLabel := ""
-	if showQuality {
-		searchRelevanceRadarLabel = ", 'Search Relevance'"
+	costValues, speedValues, relevanceValues := splitScatterAxes(scatterData)
+	costBounds := calcCenteredBounds(costValues, costMid, 0.35, 0.0005)
+	costAxisType := "linear"
+	if shouldPreferLogScale(costValues, costMid, 4.0) {
+		if b, ok := calcLogCenteredBounds(costValues, costMid, 0.20, 2.0, 0.000001); ok {
+			costBounds = b
+			costAxisType = "logarithmic"
+		}
+	}
+	speedBounds := calcCenteredBounds(speedValues, speedMid, 0.35, 200)
+	speedAxisType := "linear"
+	if shouldPreferLogScale(speedValues, speedMid, 4.0) {
+		if b, ok := calcLogCenteredBounds(speedValues, speedMid, 0.20, 2.0, 1); ok {
+			speedBounds = b
+			speedAxisType = "logarithmic"
+		}
+	}
+	relevanceBounds := clampAxisBounds(calcCenteredBounds(relevanceValues, relevanceMid, 0.25, 4), 0, 100)
+	costTickPrecision := 4
+	if costBounds.Max-costBounds.Min >= 0.01 && costAxisType == "linear" {
+		costTickPrecision = 3
 	}
 
 	return fmt.Sprintf(`
-        // Radar Chart - Provider Performance Profile
-        new Chart(document.getElementById('radarChart'), {
-            type: 'radar',
-            data: {
-                labels: ['Success Rate', 'Speed Score', 'Cost Efficiency', 'Content Volume'%s],
-                datasets: [%s]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Multi-Dimensional Performance Comparison (0-100, higher is better)' },
-                    legend: { position: 'bottom' }
-                },
-                scales: {
-                    r: {
-                        beginAtZero: true,
-                        max: 100,
-                        ticks: { stepSize: 20 }
-                    }
-                }
+        // Empty state annotation plugin for charts with no meaningful data
+        const emptyStatePlugin = {
+            id: 'emptyState',
+            afterDraw(chart, args, opts) {
+                if (!opts || !opts.enabled) return;
+                const chartArea = chart.chartArea;
+                if (!chartArea) return;
+                const {ctx} = chart;
+                const {left, right, top, bottom} = chartArea;
+                ctx.save();
+                ctx.fillStyle = 'rgba(80, 80, 80, 0.8)';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '600 13px sans-serif';
+                ctx.fillText(opts.text || 'No data available', (left + right) / 2, (top + bottom) / 2);
+                ctx.restore();
             }
-        });
-
-        // Latency Distribution Chart
-        new Chart(document.getElementById('latencyDistChart'), {
-            type: 'bar',
-            data: {
-                labels: [%s],
-                datasets: [
-                    {
-                        label: 'Min-P50 Range',
-                        data: [%s],
-                        backgroundColor: %s,
-                        borderRadius: 4
-                    },
-                    {
-                        label: 'P50-P95 Range',
-                        data: [%s],
-                        backgroundColor: %s,
-                        borderRadius: 4
-                    },
-                    {
-                        label: 'P95-Max Range',
-                        data: [%s],
-                        backgroundColor: %s,
-                        borderRadius: 4
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: 'Latency Distribution: Min, P50, P95, Max (ms)' },
-                    legend: { display: true, position: 'bottom' },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const datasetIndex = context.datasetIndex;
-                                const dataIndex = context.dataIndex;
-                                const ranges = [%s];
-                                const range = ranges[dataIndex];
-                                return context.dataset.label + ': ' + range[datasetIndex] + 'ms';
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: { stacked: true },
-                    y: { 
-                        stacked: true,
-                        beginAtZero: true,
-                        title: { display: true, text: 'Milliseconds' }
-                    }
-                }
-            }
-        });
+        };
 
         // Quadrant background plugin for scatter plots
         const quadrantPlugin = {
@@ -813,7 +904,12 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             beforeDraw(chart) {
                 const opts = chart.options.plugins.quadrantBackground;
                 if (!opts) return;
-                const {ctx, chartArea: {left, top, right, bottom}, scales: {x, y}} = chart;
+                const chartArea = chart.chartArea;
+                const x = chart.scales.x;
+                const y = chart.scales.y;
+                if (!chartArea || !x || !y) return;
+                const {ctx} = chart;
+                const {left, top, right, bottom} = chartArea;
                 const midX = x.getPixelForValue(opts.xMid);
                 const midY = y.getPixelForValue(opts.yMid);
                 const clampX = Math.max(left, Math.min(right, midX));
@@ -847,7 +943,76 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 ctx.restore();
             }
         };
-        Chart.register(quadrantPlugin);
+        Chart.register(emptyStatePlugin, quadrantPlugin);
+
+        // Radar Chart - Provider Performance Profile
+        new Chart(document.getElementById('radarChart'), {
+            type: 'radar',
+            data: {
+                labels: [%s],
+                datasets: [%s]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Multi-Dimensional Performance Comparison (0-100, higher is better)' },
+                    legend: { position: 'bottom' },
+                    emptyState: { enabled: %t, text: 'No comparable performance profile data' }
+                },
+                scales: {
+                    r: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: { stepSize: 20 }
+                    }
+                }
+            }
+        });
+
+        // Latency Distribution Chart
+        new Chart(document.getElementById('latencyDistChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: %s
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: '%s' },
+                    legend: { display: true, position: 'bottom' },
+                    emptyState: { enabled: %t, text: '%s' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const datasetIndex = context.datasetIndex;
+                                const dataIndex = context.dataIndex;
+                                const ranges = %s;
+                                if (!ranges.length) {
+                                    return context.dataset.label + ': ' + context.raw.toFixed(0) + 'ms';
+                                }
+                                const range = ranges[dataIndex];
+                                if (!range) {
+                                    return context.dataset.label + ': ' + context.raw.toFixed(0) + 'ms';
+                                }
+                                return context.dataset.label + ': ' + range[datasetIndex];
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: %s },
+                    y: { 
+                        stacked: %s,
+                        min: %.2f,
+                        max: %.2f,
+                        title: { display: true, text: 'Milliseconds' }
+                    }
+                }
+            }
+        });
 
         // Cost vs Search Relevance Scatter Plot
         new Chart(document.getElementById('costQualityScatter'), {
@@ -860,7 +1025,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     title: { display: true, text: 'Cost vs Search Relevance', font: { size: 14 } },
                     legend: { display: true, position: 'bottom' },
                     quadrantBackground: {
-                        xMid: %s, yMid: %s,
+                        xMid: %.6f, yMid: %.2f,
                         sweetCorner: 'topLeft',
                         sweetSpot: 'rgba(46, 204, 113, 0.08)',
                         worst: 'rgba(231, 76, 60, 0.06)'
@@ -875,13 +1040,22 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 },
                 scales: {
                     x: {
+                        type: '%s',
                         title: { display: true, text: 'Cost per Result (USD)' },
-                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } },
-                        beginAtZero: true
+                        min: %.6f,
+                        max: %.6f,
+                        ticks: {
+                            callback: function(v) {
+                                const abs = Math.abs(Number(v));
+                                const digits = abs < 0.001 ? 5 : (abs < 0.01 ? 4 : %d);
+                                return '$' + Number(v).toFixed(digits);
+                            }
+                        }
                     },
                     y: {
                         title: { display: true, text: 'Search Relevance (0-100)' },
-                        min: 0, max: 100
+                        min: %.2f,
+                        max: %.2f
                     }
                 }
             }
@@ -898,7 +1072,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     title: { display: true, text: 'Speed vs Search Relevance', font: { size: 14 } },
                     legend: { display: true, position: 'bottom' },
                     quadrantBackground: {
-                        xMid: %s, yMid: %s,
+                        xMid: %.2f, yMid: %.2f,
                         sweetCorner: 'topLeft',
                         sweetSpot: 'rgba(46, 204, 113, 0.08)',
                         worst: 'rgba(231, 76, 60, 0.06)'
@@ -913,12 +1087,16 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 },
                 scales: {
                     x: {
+                        type: '%s',
                         title: { display: true, text: 'Average Latency (ms)' },
-                        beginAtZero: true
+                        min: %.2f,
+                        max: %.2f,
+                        ticks: { callback: function(v) { return Number(v).toLocaleString(); } }
                     },
                     y: {
                         title: { display: true, text: 'Search Relevance (0-100)' },
-                        min: 0, max: 100
+                        min: %.2f,
+                        max: %.2f
                     }
                 }
             }
@@ -935,7 +1113,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                     title: { display: true, text: 'Cost vs Speed', font: { size: 14 } },
                     legend: { display: true, position: 'bottom' },
                     quadrantBackground: {
-                        xMid: %s, yMid: %s,
+                        xMid: %.6f, yMid: %.2f,
                         sweetCorner: 'bottomLeft',
                         sweetSpot: 'rgba(46, 204, 113, 0.08)',
                         worst: 'rgba(231, 76, 60, 0.06)'
@@ -950,13 +1128,24 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 },
                 scales: {
                     x: {
+                        type: '%s',
                         title: { display: true, text: 'Cost per Result (USD)' },
-                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } },
-                        beginAtZero: true
+                        min: %.6f,
+                        max: %.6f,
+                        ticks: {
+                            callback: function(v) {
+                                const abs = Math.abs(Number(v));
+                                const digits = abs < 0.001 ? 5 : (abs < 0.01 ? 4 : %d);
+                                return '$' + Number(v).toFixed(digits);
+                            }
+                        }
                     },
                     y: {
+                        type: '%s',
                         title: { display: true, text: 'Average Latency (ms)' },
-                        beginAtZero: true
+                        min: %.2f,
+                        max: %.2f,
+                        ticks: { callback: function(v) { return Number(v).toLocaleString(); } }
                     }
                 }
             }
@@ -974,7 +1163,8 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 maintainAspectRatio: false,
                 plugins: {
                     title: { display: true, text: 'Error Distribution by Category' },
-                    legend: { position: 'bottom' }
+                    legend: { position: 'bottom' },
+                    emptyState: { enabled: %t, text: 'No errors recorded in this run' }
                 },
                 scales: {
                     x: { stacked: true },
@@ -988,17 +1178,14 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
         });
 
 %s`,
-		searchRelevanceRadarLabel, radarDatasets,
+		radarLabels, radarDatasets, !radarHasData,
+		joinStrings(providerNames), latencyDatasets, latencyChartTitle, !latencyHasAnyData, latencyEmptyMessage,
+		latencyRangesPayload, latencyXStacked, latencyYStacked, latencyYBounds.Min, latencyYBounds.Max,
+		scatterDatasets, costMid, relevanceMid, costAxisType, costBounds.Min, costBounds.Max, costTickPrecision, relevanceBounds.Min, relevanceBounds.Max,
+		speedQualityDatasets, speedMid, relevanceMid, speedAxisType, speedBounds.Min, speedBounds.Max, relevanceBounds.Min, relevanceBounds.Max,
+		costSpeedDatasets, costMid, speedMid, costAxisType, costBounds.Min, costBounds.Max, costTickPrecision, speedAxisType, speedBounds.Min, speedBounds.Max,
 		joinStrings(providerNames),
-		formatFloatSlice(latencyDistsToMinP50(latencyDists)), "'rgba(52, 152, 219, 0.8)'",
-		formatFloatSlice(latencyDistsToP50P95(latencyDists)), "'rgba(46, 204, 113, 0.8)'",
-		formatFloatSlice(latencyDistsToP95Max(latencyDists)), "'rgba(231, 76, 60, 0.8)'",
-		g.formatLatencyRanges(latencyDists),
-		scatterDatasets, costMid, relevanceMid,
-		speedQualityDatasets, speedMid, relevanceMid,
-		costSpeedDatasets, costMid, speedMid,
-		joinStrings(providerNames),
-		errorDatasets,
+		errorDatasets, !errorHasData,
 		heatmapScript)
 }
 
@@ -1038,6 +1225,184 @@ func formatIntSlice(nums []int) string {
 	return result
 }
 
+type axisBounds struct {
+	Min float64
+	Max float64
+}
+
+func hasAnyPositive(values []float64) bool {
+	for _, v := range values {
+		if v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMeaningfulSpread(values []float64, threshold float64) bool {
+	minV, maxV, ok := minMaxFloat(values)
+	if !ok {
+		return false
+	}
+	return maxV-minV >= threshold
+}
+
+func minMaxFloat(values []float64) (float64, float64, bool) {
+	hasValue := false
+	minV := 0.0
+	maxV := 0.0
+	for _, v := range values {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		if !hasValue {
+			minV = v
+			maxV = v
+			hasValue = true
+			continue
+		}
+		if v < minV {
+			minV = v
+		}
+		if v > maxV {
+			maxV = v
+		}
+	}
+	return minV, maxV, hasValue
+}
+
+func calcPaddedBounds(values []float64, padRatio float64, minSpan float64) axisBounds {
+	minV, maxV, ok := minMaxFloat(values)
+	if !ok {
+		return axisBounds{Min: 0, Max: 1}
+	}
+	if minSpan <= 0 {
+		minSpan = 1
+	}
+	span := maxV - minV
+	if span < minSpan {
+		center := (minV + maxV) / 2
+		minV = center - minSpan/2
+		maxV = center + minSpan/2
+		span = minSpan
+	}
+	pad := span * padRatio
+	return axisBounds{Min: minV - pad, Max: maxV + pad}
+}
+
+func calcCenteredBounds(values []float64, midpoint float64, padRatio float64, minSpan float64) axisBounds {
+	minV, maxV, ok := minMaxFloat(values)
+	if !ok {
+		halfSpan := math.Max(minSpan/2, 0.5)
+		return axisBounds{Min: midpoint - halfSpan, Max: midpoint + halfSpan}
+	}
+	if minSpan <= 0 {
+		minSpan = 1
+	}
+	halfSpan := math.Max(math.Abs(maxV-midpoint), math.Abs(midpoint-minV))
+	halfSpan = math.Max(halfSpan, minSpan/2)
+	halfSpan *= (1 + padRatio)
+	if halfSpan == 0 {
+		halfSpan = minSpan / 2
+	}
+	return axisBounds{Min: midpoint - halfSpan, Max: midpoint + halfSpan}
+}
+
+func allPositive(values []float64) bool {
+	hasValue := false
+	for _, v := range values {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		hasValue = true
+		if v <= 0 {
+			return false
+		}
+	}
+	return hasValue
+}
+
+func calcLogCenteredBounds(values []float64, midpoint float64, padRatio float64, minRatio float64, floor float64) (axisBounds, bool) {
+	if midpoint <= 0 || !allPositive(values) {
+		return axisBounds{}, false
+	}
+	minV, maxV, ok := minMaxFloat(values)
+	if !ok || minV <= 0 || maxV <= 0 {
+		return axisBounds{}, false
+	}
+	ratio := math.Max(maxV/midpoint, midpoint/minV)
+	if ratio < 1 {
+		ratio = 1
+	}
+	if minRatio < 1 {
+		minRatio = 1
+	}
+	ratio *= (1 + padRatio)
+	if ratio < minRatio {
+		ratio = minRatio
+	}
+
+	minBound := midpoint / ratio
+	maxBound := midpoint * ratio
+
+	if floor > 0 && minBound < floor {
+		minBound = floor
+		maxBound = (midpoint * midpoint) / minBound
+	}
+	if maxBound <= minBound {
+		maxBound = minBound * 10
+	}
+	return axisBounds{Min: minBound, Max: maxBound}, true
+}
+
+func shouldPreferLogScale(values []float64, midpoint float64, ratioThreshold float64) bool {
+	if midpoint <= 0 || !allPositive(values) {
+		return false
+	}
+	minV, maxV, ok := minMaxFloat(values)
+	if !ok || minV <= 0 {
+		return false
+	}
+	ratio := math.Max(maxV/midpoint, midpoint/minV)
+	return ratio >= ratioThreshold
+}
+
+func clampAxisBounds(bounds axisBounds, minClamp float64, maxClamp float64) axisBounds { //nolint:unparam // lower clamp is currently 0 in callers but kept for clarity
+	bounds.Min = math.Max(minClamp, bounds.Min)
+	bounds.Max = math.Min(maxClamp, bounds.Max)
+	if bounds.Max <= bounds.Min {
+		center := (minClamp + maxClamp) / 2
+		halfSpan := math.Max((maxClamp-minClamp)/10, 1)
+		bounds.Min = math.Max(minClamp, center-halfSpan)
+		bounds.Max = math.Min(maxClamp, center+halfSpan)
+	}
+	return bounds
+}
+
+func combineFloatSlices(slices ...[]float64) []float64 {
+	total := 0
+	for _, s := range slices {
+		total += len(s)
+	}
+	combined := make([]float64, 0, total)
+	for _, s := range slices {
+		combined = append(combined, s...)
+	}
+	return combined
+}
+
+func splitScatterAxes(data []scatterData) (costs []float64, speeds []float64, relevances []float64) {
+	costs = make([]float64, 0, len(data))
+	speeds = make([]float64, 0, len(data))
+	relevances = make([]float64, 0, len(data))
+	for _, d := range data {
+		costs = append(costs, d.CostPerResult)
+		speeds = append(speeds, d.Speed)
+		relevances = append(relevances, d.SearchRelevance)
+	}
+	return costs, speeds, relevances
+}
+
 // Radar data structures
 type radarData struct {
 	SuccessRate          float64
@@ -1066,9 +1431,9 @@ type scatterData struct {
 
 // computeQuadrantMidpoints returns median cost, speed, and relevance across
 // providers. These values position the quadrant crosshairs in scatter charts.
-func computeQuadrantMidpoints(data []scatterData) (costMid, speedMid, relevanceMid string) {
+func computeQuadrantMidpoints(data []scatterData) (costMid, speedMid, relevanceMid float64) {
 	if len(data) == 0 {
-		return "0", "0", "50"
+		return 0, 0, 50
 	}
 	costs := make([]float64, len(data))
 	speeds := make([]float64, len(data))
@@ -1090,9 +1455,7 @@ func computeQuadrantMidpoints(data []scatterData) (costMid, speedMid, relevanceM
 		return s[n/2]
 	}
 
-	return fmt.Sprintf("%.6f", median(costs)),
-		fmt.Sprintf("%.1f", median(speeds)),
-		fmt.Sprintf("%.1f", median(relevances))
+	return median(costs), median(speeds), median(relevances)
 }
 
 // semanticRerankerData holds per-provider averages for search-only semantic/reranker scores.
@@ -1391,6 +1754,22 @@ func latencyDistsToP95Max(dists []latencyDist) []float64 {
 	result := make([]float64, len(dists))
 	for i, d := range dists {
 		result[i] = d.Max - d.P95
+	}
+	return result
+}
+
+func latencyDistsToAvg(dists []latencyDist) []float64 {
+	result := make([]float64, len(dists))
+	for i, d := range dists {
+		result[i] = d.Avg
+	}
+	return result
+}
+
+func latencyDistsToMax(dists []latencyDist) []float64 {
+	result := make([]float64, len(dists))
+	for i, d := range dists {
+		result[i] = d.Max
 	}
 	return result
 }

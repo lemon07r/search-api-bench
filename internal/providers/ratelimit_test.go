@@ -56,6 +56,35 @@ func TestRateLimiter_RespectsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestRateLimiter_CancelledWaitDoesNotLeakCapacity(t *testing.T) {
+	rl := NewRateLimiter(10.0) // 100ms interval
+	ctx := context.Background()
+
+	// First token is immediate.
+	if err := rl.Wait(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Start a wait that should be cancelled quickly.
+	shortCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if err := rl.Wait(shortCtx); err == nil {
+		t.Fatal("expected cancellation during wait")
+	}
+
+	// After the normal interval passes, acquiring the next token should be
+	// near-immediate. If cancelled waits leak reserved slots, this takes much
+	// longer than one interval.
+	time.Sleep(120 * time.Millisecond)
+	start := time.Now()
+	if err := rl.Wait(ctx); err != nil {
+		t.Fatalf("unexpected error after cancellation: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 35*time.Millisecond {
+		t.Fatalf("expected near-immediate token after interval, got %v", elapsed)
+	}
+}
+
 func TestRateLimiter_NilLimiterNoOp(t *testing.T) {
 	// A nil limiter in RetryConfig should not panic or block.
 	rc := DefaultRetryConfig()

@@ -10,6 +10,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 	content := `
 [general]
 concurrency = 10
+provider_concurrency = { Firecrawl = 1, EXA = 2 }
 timeout = "60s"
 output_dir = "./output"
 
@@ -36,6 +37,15 @@ url = "https://example.com"
 
 	if cfg.General.Concurrency != 10 {
 		t.Errorf("expected concurrency 10, got %d", cfg.General.Concurrency)
+	}
+	if len(cfg.General.ProviderConcurrency) != 2 {
+		t.Fatalf("expected 2 provider concurrency overrides, got %d", len(cfg.General.ProviderConcurrency))
+	}
+	if cfg.General.ProviderConcurrency["firecrawl"] != 1 {
+		t.Errorf("expected firecrawl concurrency 1, got %d", cfg.General.ProviderConcurrency["firecrawl"])
+	}
+	if cfg.General.ProviderConcurrency["exa"] != 2 {
+		t.Errorf("expected exa concurrency 2, got %d", cfg.General.ProviderConcurrency["exa"])
 	}
 	if cfg.General.Timeout != "60s" {
 		t.Errorf("expected timeout 60s, got %s", cfg.General.Timeout)
@@ -69,6 +79,14 @@ query = "test"
 	if cfg.General.Concurrency != 5 {
 		t.Errorf("expected default concurrency 5, got %d", cfg.General.Concurrency)
 	}
+	if len(cfg.General.ProviderConcurrency) != 7 {
+		t.Fatalf("expected default provider concurrency for 7 providers, got %v", cfg.General.ProviderConcurrency)
+	}
+	for _, provider := range []string{"brave", "exa", "firecrawl", "jina", "local", "mixedbread", "tavily"} {
+		if got := cfg.General.ProviderConcurrency[provider]; got != 1 {
+			t.Errorf("expected default provider_concurrency[%s]=1, got %d", provider, got)
+		}
+	}
 	if cfg.General.Timeout != "30s" {
 		t.Errorf("expected default timeout 30s, got %s", cfg.General.Timeout)
 	}
@@ -94,6 +112,31 @@ concurrency = 5
 	}
 	if err.Error() != "no tests defined in configuration" {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoad_InvalidProviderConcurrency(t *testing.T) {
+	content := `
+[general]
+provider_concurrency = { firecrawl = 0 }
+
+[[tests]]
+name = "Valid Search"
+type = "search"
+query = "test"
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected error for invalid provider_concurrency value")
+	}
+	if err.Error() != "provider_concurrency for 'firecrawl' must be > 0" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -239,9 +282,10 @@ max_depth = 0
 func TestSave_LoadRoundtrip(t *testing.T) {
 	original := &Config{
 		General: GeneralConfig{
-			Concurrency: 7,
-			Timeout:     "45s",
-			OutputDir:   "./test-output",
+			Concurrency:         7,
+			ProviderConcurrency: map[string]int{"firecrawl": 1, "exa": 2},
+			Timeout:             "45s",
+			OutputDir:           "./test-output",
 		},
 		Tests: []TestConfig{
 			{
@@ -273,6 +317,14 @@ func TestSave_LoadRoundtrip(t *testing.T) {
 
 	if loaded.General.Concurrency != original.General.Concurrency {
 		t.Errorf("concurrency mismatch: %d vs %d", loaded.General.Concurrency, original.General.Concurrency)
+	}
+	if len(loaded.General.ProviderConcurrency) != len(original.General.ProviderConcurrency) {
+		t.Errorf("provider_concurrency map size mismatch: %d vs %d", len(loaded.General.ProviderConcurrency), len(original.General.ProviderConcurrency))
+	}
+	for provider, expected := range original.General.ProviderConcurrency {
+		if got := loaded.General.ProviderConcurrency[provider]; got != expected {
+			t.Errorf("provider_concurrency[%s] mismatch: %d vs %d", provider, got, expected)
+		}
 	}
 	if loaded.General.Timeout != original.General.Timeout {
 		t.Errorf("timeout mismatch: %s vs %s", loaded.General.Timeout, original.General.Timeout)
@@ -310,5 +362,22 @@ func TestTimeoutDuration_Invalid(t *testing.T) {
 	d := g.TimeoutDuration()
 	if d != 30000000000 { // 30s in nanoseconds
 		t.Errorf("expected default 30s for invalid duration, got %v", d)
+	}
+}
+
+func TestConcurrencyForProvider(t *testing.T) {
+	g := GeneralConfig{
+		Concurrency:         4,
+		ProviderConcurrency: map[string]int{"firecrawl": 1},
+	}
+
+	if got := g.ConcurrencyForProvider("firecrawl"); got != 1 {
+		t.Fatalf("expected firecrawl override=1, got %d", got)
+	}
+	if got := g.ConcurrencyForProvider("FIRECRAWL"); got != 1 {
+		t.Fatalf("expected case-insensitive firecrawl override=1, got %d", got)
+	}
+	if got := g.ConcurrencyForProvider("exa"); got != 4 {
+		t.Fatalf("expected default concurrency=4 for exa, got %d", got)
 	}
 }

@@ -31,25 +31,28 @@ func NewRateLimiter(maxPerSecond float64) *RateLimiter {
 // Wait blocks until a request token is available or the context is cancelled.
 // Returns nil when a token is granted, or the context error if cancelled.
 func (rl *RateLimiter) Wait(ctx context.Context) error {
-	rl.mu.Lock()
-	now := time.Now()
+	for {
+		rl.mu.Lock()
+		now := time.Now()
 
-	// First request or enough time has passed — grant immediately.
-	if rl.last.IsZero() || now.Sub(rl.last) >= rl.interval {
-		rl.last = now
+		// First request or enough time has passed — grant immediately.
+		if rl.last.IsZero() || now.Sub(rl.last) >= rl.interval {
+			rl.last = now
+			rl.mu.Unlock()
+			return nil
+		}
+
+		// Wait until the next available slot. We do not reserve the slot in
+		// advance; this avoids leaking capacity when the waiting context is
+		// cancelled before the token is actually granted.
+		waitFor := rl.interval - now.Sub(rl.last)
 		rl.mu.Unlock()
-		return nil
+
+		if waitFor <= 0 {
+			continue
+		}
+		if err := SleepWithContext(ctx, waitFor); err != nil {
+			return err
+		}
 	}
-
-	// Calculate how long to wait for the next slot.
-	waitUntil := rl.last.Add(rl.interval)
-	rl.last = waitUntil
-	rl.mu.Unlock()
-
-	delay := time.Until(waitUntil)
-	if delay <= 0 {
-		return nil
-	}
-
-	return SleepWithContext(ctx, delay)
 }

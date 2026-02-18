@@ -27,6 +27,7 @@ var costCalculator = metrics.NewCostCalculator()
 type Runner struct {
 	providers   []providers.Provider
 	config      *config.Config
+	providerSem map[string]chan struct{}
 	collector   *metrics.Collector
 	progress    *progress.Manager
 	debugLogger *debug.Logger
@@ -75,9 +76,21 @@ func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Ma
 	if runnerOptions.CapabilityPolicy == "" {
 		runnerOptions.CapabilityPolicy = CapabilityPolicyStrict
 	}
+	providerSem := make(map[string]chan struct{}, len(provs))
+	for _, prov := range provs {
+		name := strings.ToLower(strings.TrimSpace(prov.Name()))
+		if name == "" {
+			continue
+		}
+		if _, exists := providerSem[name]; exists {
+			continue
+		}
+		providerSem[name] = make(chan struct{}, cfg.General.ConcurrencyForProvider(name))
+	}
 	return &Runner{
 		providers:   provs,
 		config:      cfg,
+		providerSem: providerSem,
 		collector:   metrics.NewCollector(),
 		progress:    prog,
 		debugLogger: debugLog,
@@ -94,12 +107,21 @@ func (r *Runner) Run(ctx context.Context) error {
 	} else {
 		// No progress bar, print full header
 		fmt.Printf("Starting benchmark with %d tests against %d providers\n", len(r.config.Tests), len(r.providers))
-		fmt.Printf("Mode: %s, Repeats: %d, Concurrency: %d, Timeout: %s\n\n",
-			r.options.Mode, r.options.Repeats, r.config.General.Concurrency, r.config.General.Timeout)
+		if len(r.config.General.ProviderConcurrency) > 0 {
+			fmt.Printf("Mode: %s, Repeats: %d, Concurrency: %d (provider overrides: %d), Timeout: %s\n\n",
+				r.options.Mode, r.options.Repeats, r.config.General.Concurrency, len(r.config.General.ProviderConcurrency), r.config.General.Timeout)
+		} else {
+			fmt.Printf("Mode: %s, Repeats: %d, Concurrency: %d, Timeout: %s\n\n",
+				r.options.Mode, r.options.Repeats, r.config.General.Concurrency, r.config.General.Timeout)
+		}
 	}
 
-	// Create semaphore for concurrency control
-	sem := make(chan struct{}, r.config.General.Concurrency)
+	// Create semaphore for concurrency control.
+	globalLimit := r.config.General.Concurrency
+	if globalLimit <= 0 {
+		globalLimit = 1
+	}
+	globalSem := make(chan struct{}, globalLimit)
 	var wg sync.WaitGroup
 
 	// Run tests
@@ -109,8 +131,18 @@ func (r *Runner) Run(ctx context.Context) error {
 				wg.Add(1)
 				go func(rep int, t config.TestConfig, p providers.Provider) {
 					defer wg.Done()
-					sem <- struct{}{}
-					defer func() { <-sem }()
+					providerSem := r.providerSem[strings.ToLower(strings.TrimSpace(p.Name()))]
+					if providerSem == nil {
+						// Fallback for unexpected provider naming mismatches.
+						providerSem = globalSem
+					}
+
+					globalSem <- struct{}{}
+					providerSem <- struct{}{}
+					defer func() {
+						<-providerSem
+						<-globalSem
+					}()
 
 					r.runTest(ctx, rep, t, p)
 				}(repeat, test, prov)

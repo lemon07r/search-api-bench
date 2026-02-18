@@ -20,7 +20,12 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.firecrawl.dev/v2"
+	defaultBaseURL                   = "https://api.firecrawl.dev/v2"
+	defaultRateLimitPerMinute        = 5.0
+	defaultMaxRetries                = 5
+	defaultInitialRetryBackoff       = 1 * time.Second
+	defaultMaxRetryBackoff           = 90 * time.Second
+	defaultFallbackHTTPClientTimeout = 60 * time.Second
 )
 
 // Client represents a Firecrawl API client
@@ -39,12 +44,18 @@ func NewClient() (*Client, error) {
 	}
 
 	retryCfg := providers.DefaultRetryConfig()
+	retryCfg.MaxRetries = parseNonNegativeIntEnv("FIRECRAWL_MAX_RETRIES", defaultMaxRetries)
+	retryCfg.InitialBackoff = parsePositiveDurationEnv("FIRECRAWL_RETRY_INITIAL_BACKOFF", defaultInitialRetryBackoff)
+	retryCfg.MaxBackoff = parsePositiveDurationEnv("FIRECRAWL_RETRY_MAX_BACKOFF", defaultMaxRetryBackoff)
+	if retryCfg.MaxBackoff < retryCfg.InitialBackoff {
+		retryCfg.MaxBackoff = retryCfg.InitialBackoff
+	}
 
 	// Configure per-provider rate limiter.
 	// FIRECRAWL_RATE_LIMIT overrides the default (requests per minute).
 	// Default: 5 req/min (conservative for free tier's 6 req/min ceiling).
 	// Set to 0 to disable rate limiting (e.g. paid plans with high limits).
-	ratePerMin := 5.0
+	ratePerMin := defaultRateLimitPerMinute
 	if v := os.Getenv("FIRECRAWL_RATE_LIMIT"); v != "" {
 		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
 			ratePerMin = parsed
@@ -58,10 +69,34 @@ func NewClient() (*Client, error) {
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: defaultFallbackHTTPClientTimeout,
 		},
 		retryCfg: retryCfg,
 	}, nil
+}
+
+func parseNonNegativeIntEnv(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
+}
+
+func parsePositiveDurationEnv(key string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 // Name returns the provider name

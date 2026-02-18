@@ -572,14 +572,26 @@ func intPtr(v int) *int {
 	return &v
 }
 
+func cloneProviderConcurrency(overrides map[string]int) map[string]int {
+	if len(overrides) == 0 {
+		return nil
+	}
+	cloned := make(map[string]int, len(overrides))
+	for provider, limit := range overrides {
+		cloned[provider] = limit
+	}
+	return cloned
+}
+
 // applyQuickMode modifies the configuration for quick testing
 func applyQuickMode(cfg *config.Config) *config.Config {
 	// Create a copy of the config
 	quickCfg := &config.Config{
 		General: config.GeneralConfig{
-			Concurrency: cfg.General.Concurrency,
-			Timeout:     "30s",
-			OutputDir:   cfg.General.OutputDir,
+			Concurrency:         cfg.General.Concurrency,
+			ProviderConcurrency: cloneProviderConcurrency(cfg.General.ProviderConcurrency),
+			Timeout:             "30s",
+			OutputDir:           cfg.General.OutputDir,
 		},
 		Tests: []config.TestConfig{},
 	}
