@@ -69,12 +69,12 @@ jobs:
       - name: Create release archives
         run: |
           mkdir -p release
-          for dir in artifacts/*/; do
-            filename=$(basename "$dir")
+          for file in artifacts/search-api-bench-*; do
+            filename=$(basename "$file")
             if [[ "$filename" == *windows* ]]; then
-              (cd "$dir" && zip -r "../../release/${filename}.zip" .)
+              zip -j "release/${filename}.zip" "$file"
             else
-              tar -czf "release/${filename}.tar.gz" -C "$dir" .
+              tar -czf "release/${filename}.tar.gz" -C artifacts "$filename"
             fi
           done
 
