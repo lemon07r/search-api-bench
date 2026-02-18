@@ -267,6 +267,70 @@ func TestRun_RespectsConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestRun_RespectsProviderConcurrencyLimit(t *testing.T) {
+	cfg := &config.Config{
+		General: config.GeneralConfig{
+			Concurrency:         4,
+			ProviderConcurrency: map[string]int{"firecrawl": 1},
+			Timeout:             "30s",
+			OutputDir:           t.TempDir(),
+		},
+		Tests: []config.TestConfig{
+			{Name: "test1", Type: "search", Query: "q1"},
+			{Name: "test2", Type: "search", Query: "q2"},
+			{Name: "test3", Type: "search", Query: "q3"},
+			{Name: "test4", Type: "search", Query: "q4"},
+		},
+	}
+
+	updateMax := func(current, max *int32) {
+		now := atomic.AddInt32(current, 1)
+		for {
+			recorded := atomic.LoadInt32(max)
+			if now <= recorded {
+				break
+			}
+			if atomic.CompareAndSwapInt32(max, recorded, now) {
+				break
+			}
+		}
+	}
+
+	var firecrawlCurrent, firecrawlMax int32
+	firecrawl := &mockProvider{
+		name: "firecrawl",
+		searchFn: func(_ context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
+			updateMax(&firecrawlCurrent, &firecrawlMax)
+			time.Sleep(50 * time.Millisecond)
+			atomic.AddInt32(&firecrawlCurrent, -1)
+			return &providers.SearchResult{
+				Query:       query,
+				Latency:     50 * time.Millisecond,
+				CreditsUsed: 1,
+			}, nil
+		},
+	}
+
+	exa := &mockProvider{
+		name: "exa",
+		searchFn: func(_ context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
+			time.Sleep(50 * time.Millisecond)
+			return &providers.SearchResult{
+				Query:       query,
+				Latency:     50 * time.Millisecond,
+				CreditsUsed: 1,
+			}, nil
+		},
+	}
+
+	runner := NewRunner(cfg, []providers.Provider{firecrawl, exa}, nil, nil, nil)
+	runner.Run(context.Background())
+
+	if firecrawlMax > 1 {
+		t.Fatalf("firecrawl max concurrency (%d) exceeded configured provider limit (1)", firecrawlMax)
+	}
+}
+
 func TestRun_SearchTest(t *testing.T) {
 	cfg := &config.Config{
 		General: config.GeneralConfig{

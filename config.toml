@@ -2,8 +2,9 @@
 # This file defines test scenarios for comparing Firecrawl and Tavily APIs
 
 [general]
-concurrency = 3
-timeout = "45s"
+concurrency = 5
+provider_concurrency = { brave = 1, exa = 1, firecrawl = 1, mixedbread = 1, tavily = 1 }
+timeout = "90s"
 output_dir = "./results"
 
 # =============================================================================

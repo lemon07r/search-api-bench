@@ -19,9 +19,22 @@ type Config struct {
 
 // GeneralConfig contains general settings
 type GeneralConfig struct {
-	Concurrency int    `toml:"concurrency"`
-	Timeout     string `toml:"timeout"`
-	OutputDir   string `toml:"output_dir"`
+	Concurrency         int            `toml:"concurrency"`
+	ProviderConcurrency map[string]int `toml:"provider_concurrency"`
+	Timeout             string         `toml:"timeout"`
+	OutputDir           string         `toml:"output_dir"`
+}
+
+func defaultProviderConcurrency() map[string]int {
+	return map[string]int{
+		"brave":      1,
+		"exa":        1,
+		"firecrawl":  1,
+		"jina":       1,
+		"local":      1,
+		"mixedbread": 1,
+		"tavily":     1,
+	}
 }
 
 // TestConfig represents a single test case
@@ -53,6 +66,48 @@ func (g GeneralConfig) TimeoutDuration() time.Duration {
 		return 30 * time.Second
 	}
 	return d
+}
+
+// ConcurrencyForProvider returns the effective concurrency for a provider.
+// It uses provider-specific overrides when present and falls back to the
+// global concurrency value.
+func (g GeneralConfig) ConcurrencyForProvider(provider string) int {
+	base := g.Concurrency
+	if base <= 0 {
+		base = 1
+	}
+	if len(g.ProviderConcurrency) == 0 {
+		return base
+	}
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	if normalized != "" {
+		if limit, ok := g.ProviderConcurrency[normalized]; ok && limit > 0 {
+			return limit
+		}
+	}
+	// Support programmatic configs that may not have normalized keys.
+	if limit, ok := g.ProviderConcurrency[provider]; ok && limit > 0 {
+		return limit
+	}
+	return base
+}
+
+func normalizeProviderConcurrency(raw map[string]int) (map[string]int, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	normalized := make(map[string]int, len(raw))
+	for provider, limit := range raw {
+		name := strings.ToLower(strings.TrimSpace(provider))
+		if name == "" {
+			return nil, fmt.Errorf("provider_concurrency contains an empty provider name")
+		}
+		if limit <= 0 {
+			return nil, fmt.Errorf("provider_concurrency for '%s' must be > 0", provider)
+		}
+		normalized[name] = limit
+	}
+	return normalized, nil
 }
 
 // validatePath checks for path traversal attempts
@@ -97,6 +152,14 @@ func Load(path string) (*Config, error) {
 	if cfg.General.OutputDir == "" {
 		cfg.General.OutputDir = "./results"
 	}
+	if len(cfg.General.ProviderConcurrency) == 0 {
+		cfg.General.ProviderConcurrency = defaultProviderConcurrency()
+	}
+	normalizedProviderConcurrency, err := normalizeProviderConcurrency(cfg.General.ProviderConcurrency)
+	if err != nil {
+		return nil, err
+	}
+	cfg.General.ProviderConcurrency = normalizedProviderConcurrency
 
 	// Validate tests
 	if len(cfg.Tests) == 0 {

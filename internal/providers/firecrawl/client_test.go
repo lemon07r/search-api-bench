@@ -33,6 +33,51 @@ func TestNewClient_WithAPIKey(t *testing.T) {
 	}
 }
 
+func TestNewClient_DefaultRetryHeadroom(t *testing.T) {
+	t.Setenv("FIRECRAWL_API_KEY", "test-key")
+	t.Setenv("FIRECRAWL_MAX_RETRIES", "")
+	t.Setenv("FIRECRAWL_RETRY_INITIAL_BACKOFF", "")
+	t.Setenv("FIRECRAWL_RETRY_MAX_BACKOFF", "")
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if client.retryCfg.MaxRetries != defaultMaxRetries {
+		t.Fatalf("expected default max retries=%d, got %d", defaultMaxRetries, client.retryCfg.MaxRetries)
+	}
+	if client.retryCfg.InitialBackoff != defaultInitialRetryBackoff {
+		t.Fatalf("expected default initial backoff=%v, got %v", defaultInitialRetryBackoff, client.retryCfg.InitialBackoff)
+	}
+	if client.retryCfg.MaxBackoff != defaultMaxRetryBackoff {
+		t.Fatalf("expected default max backoff=%v, got %v", defaultMaxRetryBackoff, client.retryCfg.MaxBackoff)
+	}
+}
+
+func TestNewClient_RetryEnvOverridesAndClamp(t *testing.T) {
+	t.Setenv("FIRECRAWL_API_KEY", "test-key")
+	t.Setenv("FIRECRAWL_MAX_RETRIES", "7")
+	t.Setenv("FIRECRAWL_RETRY_INITIAL_BACKOFF", "5s")
+	t.Setenv("FIRECRAWL_RETRY_MAX_BACKOFF", "2s")
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if client.retryCfg.MaxRetries != 7 {
+		t.Fatalf("expected max retries=7, got %d", client.retryCfg.MaxRetries)
+	}
+	if client.retryCfg.InitialBackoff != 5*time.Second {
+		t.Fatalf("expected initial backoff=5s, got %v", client.retryCfg.InitialBackoff)
+	}
+	// Max backoff is clamped to at least the initial backoff.
+	if client.retryCfg.MaxBackoff != 5*time.Second {
+		t.Fatalf("expected max backoff=5s after clamp, got %v", client.retryCfg.MaxBackoff)
+	}
+}
+
 func TestSearch_Success(t *testing.T) {
 	server := testutil.NewIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {

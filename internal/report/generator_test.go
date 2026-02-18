@@ -440,10 +440,10 @@ func TestGenerateMarkdown_IncludesQualityByTestTypeSection(t *testing.T) {
 	if !strings.Contains(report, "### Scoring by Test Type") {
 		t.Fatal("expected scoring by test type section")
 	}
-	if !strings.Contains(report, "| Provider | Search Relevance | Search Coverage | Extract Heuristic | Extract Coverage | Crawl Heuristic | Crawl Coverage |") {
+	if !strings.Contains(report, "| Provider | Search Relevance | Search Coverage | Semantic | Semantic Coverage | Reranker | Reranker Coverage | Search Component Avg | Component Coverage | Extract Heuristic | Extract Coverage | Crawl Heuristic | Crawl Coverage |") {
 		t.Fatal("expected scoring by test type table header")
 	}
-	if !strings.Contains(report, "| provider1 | 70.0 | 100.0% (1/1) | 90.0 | 100.0% (1/1) | - | 0.0% (0/1) |") {
+	if !strings.Contains(report, "| provider1 | 70.0 | 100.0% (1/1) | - | 0.0% (0/1) | - | 0.0% (0/1) | - | 0.0% (0/1) | 90.0 | 100.0% (1/1) | - | 0.0% (0/1) |") {
 		t.Fatal("expected provider scoring breakdown row")
 	}
 }
@@ -527,8 +527,176 @@ func TestGenerateHTML_IncludesQualityByTestTypeSection(t *testing.T) {
 	if !strings.Contains(html, "Scoring by Test Type") {
 		t.Fatal("expected scoring by test type section in HTML")
 	}
-	if !strings.Contains(html, "Search Relevance") || !strings.Contains(html, "Extract Heuristic") || !strings.Contains(html, "Crawl Heuristic") {
+	if !strings.Contains(html, "Search Relevance") ||
+		!strings.Contains(html, "Semantic") ||
+		!strings.Contains(html, "Reranker") ||
+		!strings.Contains(html, "Search Component Avg") ||
+		!strings.Contains(html, "Extract Heuristic") ||
+		!strings.Contains(html, "Crawl Heuristic") {
 		t.Fatal("expected scoring-by-type columns in HTML")
+	}
+}
+
+func TestGenerateJSON_ScoringByTestTypeIncludesSearchComponents(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:      "Search",
+		Provider:      "provider1",
+		TestType:      "search",
+		Success:       true,
+		QualityScore:  88,
+		SemanticScore: 81,
+		RerankerScore: 91,
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateJSON(); err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "report.json"))
+	if err != nil {
+		t.Fatalf("failed to read report: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf("failed to unmarshal report JSON: %v", err)
+	}
+
+	scoringMap, ok := payload["scoring_by_test_type"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected scoring_by_test_type map")
+	}
+	providerMap, ok := scoringMap["provider1"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected provider scoring map")
+	}
+
+	for _, key := range []string{"search_semantic", "search_reranker", "search_component_avg"} {
+		if _, ok := providerMap[key]; !ok {
+			t.Fatalf("expected key %q in provider scoring output", key)
+		}
+	}
+}
+
+func TestGenerateHTML_AdvancedChartsUseBoundedAxesAndNoNestedLatencyRanges(t *testing.T) {
+	c := setupMockCollector()
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+
+	if err := gen.GenerateHTML(); err != nil {
+		t.Fatalf("GenerateHTML failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.html"))
+	html := string(content)
+
+	if !strings.Contains(html, "title: { display: true, text: 'Cost per Result (USD)' },\n                        min: ") {
+		t.Fatal("expected explicit min axis bound on cost-based scatter charts")
+	}
+	if strings.Contains(html, "const ranges = [[[") {
+		t.Fatal("latency tooltip ranges should not be double-wrapped")
+	}
+	if !strings.Contains(html, "const ranges = [") {
+		t.Fatal("expected latency tooltip ranges payload")
+	}
+}
+
+func TestGenerateHTML_AdvancedChartsShowEmptyStateForNoErrors(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:  "Search",
+		Provider:  "provider1",
+		TestType:  "search",
+		Success:   true,
+		Latency:   100 * time.Millisecond,
+		CostUSD:   0.01,
+		Timestamp: time.Now(),
+	})
+	c.AddResult(metrics.Result{
+		TestName:  "Search",
+		Provider:  "provider2",
+		TestType:  "search",
+		Success:   true,
+		Latency:   120 * time.Millisecond,
+		CostUSD:   0.02,
+		Timestamp: time.Now(),
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateHTML(); err != nil {
+		t.Fatalf("GenerateHTML failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.html"))
+	html := string(content)
+	if !strings.Contains(html, "No errors recorded in this run") {
+		t.Fatal("expected explicit no-error annotation in advanced analytics")
+	}
+}
+
+func TestGenerateHTML_TradeoffUsesLogScaleForSkewedAxes(t *testing.T) {
+	c := metrics.NewCollector()
+	results := []metrics.Result{
+		{TestName: "Search", Provider: "p1", TestType: "search", Success: true, Latency: 150 * time.Millisecond, CostUSD: 0.0012, ResultsCount: 5, QualityScore: 89},
+		{TestName: "Search", Provider: "p2", TestType: "search", Success: true, Latency: 300 * time.Millisecond, CostUSD: 0.0015, ResultsCount: 5, QualityScore: 90},
+		{TestName: "Search", Provider: "p3", TestType: "search", Success: true, Latency: 30 * time.Second, CostUSD: 0.0090, ResultsCount: 5, QualityScore: 86},
+		{TestName: "Search", Provider: "p4", TestType: "search", Success: true, Latency: 220 * time.Millisecond, CostUSD: 0.0010, ResultsCount: 5, QualityScore: 88},
+		{TestName: "Search", Provider: "p5", TestType: "search", Success: true, Latency: 240 * time.Millisecond, CostUSD: 0.0080, ResultsCount: 5, QualityScore: 91},
+	}
+	for _, r := range results {
+		c.AddResult(r)
+	}
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateHTML(); err != nil {
+		t.Fatalf("GenerateHTML failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.html"))
+	html := string(content)
+
+	if strings.Count(html, "type: 'logarithmic'") < 2 {
+		t.Fatal("expected logarithmic axes for skewed trade-off scatter charts")
+	}
+}
+
+func TestGenerateHTML_RadarLabelsStayAlignedWithoutQuality(t *testing.T) {
+	c := metrics.NewCollector()
+	c.AddResult(metrics.Result{
+		TestName:      "Extract",
+		Provider:      "provider1",
+		TestType:      "extract",
+		Success:       true,
+		Latency:       80 * time.Millisecond,
+		ContentLength: 100,
+	})
+	c.AddResult(metrics.Result{
+		TestName:      "Extract",
+		Provider:      "provider2",
+		TestType:      "extract",
+		Success:       true,
+		Latency:       120 * time.Millisecond,
+		ContentLength: 200,
+	})
+
+	tmpDir := t.TempDir()
+	gen := NewGenerator(c, tmpDir)
+	if err := gen.GenerateHTML(); err != nil {
+		t.Fatalf("GenerateHTML failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, "report.html"))
+	html := string(content)
+	if !strings.Contains(html, "labels: ['Success Rate', 'Speed Score', 'Cost Efficiency', 'Content Volume']") {
+		t.Fatal("expected radar labels without search relevance when quality is disabled")
+	}
+	if strings.Contains(html, "labels: ['Success Rate', 'Speed Score', 'Cost Efficiency', 'Content Volume', 'Search Relevance']") {
+		t.Fatal("radar labels should not include search relevance when quality is unavailable")
 	}
 }
 

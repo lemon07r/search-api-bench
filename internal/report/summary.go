@@ -66,9 +66,12 @@ func (s testTypeQualityStats) CoveragePct() float64 {
 }
 
 type providerQualityByTestType struct {
-	Search  testTypeQualityStats `json:"search"`
-	Extract testTypeQualityStats `json:"extract"`
-	Crawl   testTypeQualityStats `json:"crawl"`
+	Search             testTypeQualityStats `json:"search"`
+	SearchSemantic     testTypeQualityStats `json:"search_semantic"`
+	SearchReranker     testTypeQualityStats `json:"search_reranker"`
+	SearchComponentAvg testTypeQualityStats `json:"search_component_avg"`
+	Extract            testTypeQualityStats `json:"extract"`
+	Crawl              testTypeQualityStats `json:"crawl"`
 }
 
 // formatCostUSD formats a cost value in USD for display
@@ -97,6 +100,12 @@ func (g *Generator) computeProviderQualityByTestType(provider string) providerQu
 		"extract": 0,
 		"crawl":   0,
 	}
+	searchSemantic := testTypeQualityStats{}
+	searchReranker := testTypeQualityStats{}
+	searchComponent := testTypeQualityStats{}
+	searchSemanticTotal := 0.0
+	searchRerankerTotal := 0.0
+	searchComponentTotal := 0.0
 
 	for _, r := range results {
 		acc, ok := typeAccumulator[r.TestType]
@@ -109,6 +118,34 @@ func (g *Generator) computeProviderQualityByTestType(provider string) providerQu
 			acc.ScoredTests++
 			typeTotals[r.TestType] += r.QualityScore
 		}
+
+		if r.TestType != "search" {
+			continue
+		}
+
+		searchSemantic.ExecutedTests++
+		searchReranker.ExecutedTests++
+		searchComponent.ExecutedTests++
+
+		componentCount := 0
+		componentTotal := 0.0
+
+		if r.SemanticScore > 0 {
+			searchSemantic.ScoredTests++
+			searchSemanticTotal += r.SemanticScore
+			componentCount++
+			componentTotal += r.SemanticScore
+		}
+		if r.RerankerScore > 0 {
+			searchReranker.ScoredTests++
+			searchRerankerTotal += r.RerankerScore
+			componentCount++
+			componentTotal += r.RerankerScore
+		}
+		if componentCount > 0 {
+			searchComponent.ScoredTests++
+			searchComponentTotal += componentTotal / float64(componentCount)
+		}
 	}
 
 	for testType, acc := range typeAccumulator {
@@ -116,11 +153,23 @@ func (g *Generator) computeProviderQualityByTestType(provider string) providerQu
 			acc.AvgQuality = typeTotals[testType] / float64(acc.ScoredTests)
 		}
 	}
+	if searchSemantic.ScoredTests > 0 {
+		searchSemantic.AvgQuality = searchSemanticTotal / float64(searchSemantic.ScoredTests)
+	}
+	if searchReranker.ScoredTests > 0 {
+		searchReranker.AvgQuality = searchRerankerTotal / float64(searchReranker.ScoredTests)
+	}
+	if searchComponent.ScoredTests > 0 {
+		searchComponent.AvgQuality = searchComponentTotal / float64(searchComponent.ScoredTests)
+	}
 
 	return providerQualityByTestType{
-		Search:  *typeAccumulator["search"],
-		Extract: *typeAccumulator["extract"],
-		Crawl:   *typeAccumulator["crawl"],
+		Search:             *typeAccumulator["search"],
+		SearchSemantic:     searchSemantic,
+		SearchReranker:     searchReranker,
+		SearchComponentAvg: searchComponent,
+		Extract:            *typeAccumulator["extract"],
+		Crawl:              *typeAccumulator["crawl"],
 	}
 }
 
@@ -154,17 +203,23 @@ func scoreLabelForTestType(testType string) string {
 func (g *Generator) writeQualityByTestType(sb *strings.Builder, providers []string) {
 	sb.WriteString("### Scoring by Test Type\n\n")
 	sb.WriteString("_Search relevance uses model-assisted signals; extract and crawl scores are rule-based heuristics._\n\n")
-	sb.WriteString("| Provider | Search Relevance | Search Coverage | Extract Heuristic | Extract Coverage | Crawl Heuristic | Crawl Coverage |\n")
-	sb.WriteString("|----------|------------------|-----------------|-------------------|------------------|-----------------|---------------|\n")
+	sb.WriteString("| Provider | Search Relevance | Search Coverage | Semantic | Semantic Coverage | Reranker | Reranker Coverage | Search Component Avg | Component Coverage | Extract Heuristic | Extract Coverage | Crawl Heuristic | Crawl Coverage |\n")
+	sb.WriteString("|----------|------------------|-----------------|----------|-------------------|----------|-------------------|----------------------|--------------------|-------------------|------------------|-----------------|---------------|\n")
 
 	for _, provider := range providers {
 		byType := g.computeProviderQualityByTestType(provider)
 		fmt.Fprintf(
 			sb,
-			"| %s | %s | %s | %s | %s | %s | %s |\n",
+			"| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			provider,
 			formatQualityValue(byType.Search),
 			formatQualityCoverage(byType.Search),
+			formatQualityValue(byType.SearchSemantic),
+			formatQualityCoverage(byType.SearchSemantic),
+			formatQualityValue(byType.SearchReranker),
+			formatQualityCoverage(byType.SearchReranker),
+			formatQualityValue(byType.SearchComponentAvg),
+			formatQualityCoverage(byType.SearchComponentAvg),
 			formatQualityValue(byType.Extract),
 			formatQualityCoverage(byType.Extract),
 			formatQualityValue(byType.Crawl),

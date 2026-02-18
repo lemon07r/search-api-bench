@@ -83,6 +83,11 @@ JINA_WITH_GENERATED_ALT=false
 # Set higher for paid plans, or 0 to disable.
 FIRECRAWL_RATE_LIMIT=5
 
+# Optional Firecrawl retry tuning (defaults shown)
+FIRECRAWL_MAX_RETRIES=5
+FIRECRAWL_RETRY_INITIAL_BACKOFF=1s
+FIRECRAWL_RETRY_MAX_BACKOFF=90s
+
 # Optional scoring diagnostics
 EMBEDDING_MODEL_BASE_URL=https://api.provider.com/v1
 EMBEDDING_MODEL_API_KEY=your_key
@@ -119,6 +124,7 @@ When ground-truth test config fields exist (`expected_topics`, `must_include_ter
 ```toml
 [general]
 concurrency = 3
+provider_concurrency = { firecrawl = 1 } # optional per-provider override(s)
 timeout = "45s"
 output_dir = "./results"
 
@@ -146,12 +152,13 @@ Notes:
 - `max_depth = 0` behavior is provider-dependent: Firecrawl auto-calculates depth from the seed URL's path (e.g., `/3/tutorial/` → depth 2); other providers treat it as start page only (no link expansion).
 - `max_pages` and `max_depth` are optional; provider defaults are used if omitted.
 - `-no-search` removes all search tests at runtime.
+- `provider_concurrency` is optional. If omitted, defaults are `1` per built-in provider (`firecrawl`, `tavily`, `brave`, `exa`, `mixedbread`, `local`, `jina`), with global `concurrency` still acting as the overall cap.
 
 ## Providers
 
 | Provider | Search | Extract | Crawl | Env Var | Capability Notes |
 |---|---:|---:|---:|---|---|
-| Firecrawl | yes | yes | yes | `FIRECRAWL_API_KEY` | Native for all ops |
+| Firecrawl | yes | yes | yes | `FIRECRAWL_API_KEY` (+ optional `FIRECRAWL_*` tuning vars) | Native for all ops |
 | Tavily | yes | yes | yes | `TAVILY_API_KEY` | Search/extract native; crawl emulated (map+extract) |
 | Brave | yes | yes | yes | `BRAVE_API_KEY` | Search native; extract/crawl emulated |
 | Exa | yes | yes | yes | `EXA_API_KEY` | Search/extract native; crawl emulated |

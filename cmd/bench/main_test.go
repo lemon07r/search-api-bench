@@ -127,9 +127,10 @@ func TestParseProviders_ExplicitJinaWithoutFlag(t *testing.T) {
 func TestApplyQuickMode_NormalizesCrawlDepthToOne(t *testing.T) {
 	cfg := &config.Config{
 		General: config.GeneralConfig{
-			Concurrency: 2,
-			Timeout:     "45s",
-			OutputDir:   "./results",
+			Concurrency:         2,
+			ProviderConcurrency: map[string]int{"firecrawl": 1},
+			Timeout:             "45s",
+			OutputDir:           "./results",
 		},
 		Tests: []config.TestConfig{
 			{Name: "search", Type: "search", Query: "q"},
@@ -147,6 +148,9 @@ func TestApplyQuickMode_NormalizesCrawlDepthToOne(t *testing.T) {
 	quick := applyQuickMode(cfg)
 	if quick.General.Timeout != "30s" {
 		t.Fatalf("expected quick timeout 30s, got %s", quick.General.Timeout)
+	}
+	if quick.General.ProviderConcurrency["firecrawl"] != 1 {
+		t.Fatalf("expected provider concurrency override to be preserved, got %v", quick.General.ProviderConcurrency)
 	}
 
 	foundCrawl := false
