@@ -8,6 +8,8 @@ import (
 	"math"
 	"math/rand/v2"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,7 +28,7 @@ func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxRetries:     3,
 		InitialBackoff: 500 * time.Millisecond,
-		MaxBackoff:     10 * time.Second,
+		MaxBackoff:     60 * time.Second,
 		BackoffFactor:  2.0,
 		RetryableErrors: []int{
 			http.StatusTooManyRequests,     // 429
@@ -200,6 +202,34 @@ func (rc *RetryConfig) isRetryable(err error) bool {
 	return false
 }
 
+// retryAfterBodyPattern matches "retry after Xs" in API response bodies (e.g. Firecrawl).
+var retryAfterBodyPattern = regexp.MustCompile(`(?i)retry after (\d+)s`)
+
+// parseRetryAfter extracts a wait duration from a 429 response.
+// It checks the standard Retry-After header first (seconds or HTTP-date),
+// then falls back to parsing "retry after Xs" from the response body.
+// Returns 0 if no hint is found.
+func parseRetryAfter(headers http.Header, body []byte) time.Duration {
+	if ra := headers.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+		if t, err := http.ParseTime(ra); err == nil {
+			if d := time.Until(t); d > 0 {
+				return d
+			}
+		}
+	}
+
+	if m := retryAfterBodyPattern.FindSubmatch(body); len(m) == 2 {
+		if secs, err := strconv.Atoi(string(m[1])); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+
+	return 0
+}
+
 // SleepWithContext sleeps for the given duration or until context is cancelled
 func SleepWithContext(ctx context.Context, duration time.Duration) error {
 	select {
@@ -275,7 +305,21 @@ func (rc *RetryConfig) DoHTTPRequestDetailed(ctx context.Context, client *http.C
 			if attempt == rc.MaxRetries {
 				break
 			}
+
+			// For 429 responses, prefer the server's retry-after hint
 			backoff := rc.CalculateBackoff(attempt)
+			if resp.StatusCode == http.StatusTooManyRequests {
+				if ra := parseRetryAfter(headers, body); ra > 0 {
+					// Use server hint with small jitter, capped at MaxBackoff
+					//nolint:gosec // Math/rand/v2 is sufficient for jitter
+					ra += time.Duration(rand.Float64() * float64(2*time.Second))
+					if ra > rc.MaxBackoff {
+						ra = rc.MaxBackoff
+					}
+					backoff = ra
+				}
+			}
+
 			if err := SleepWithContext(ctx, backoff); err != nil {
 				return nil, err
 			}
