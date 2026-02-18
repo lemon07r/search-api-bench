@@ -15,10 +15,10 @@ func TestParseProviders_All(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
-	if len(result) != 6 {
-		t.Errorf("expected 6 providers for 'all' (Jina excluded by default), got %d", len(result))
+	if len(result) != 5 {
+		t.Errorf("expected 5 providers for 'all' (Local and Jina excluded by default), got %d", len(result))
 	}
-	expected := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread"}
+	expected := []string{"firecrawl", "tavily", "brave", "exa", "mixedbread"}
 	for i, exp := range expected {
 		if result[i] != exp {
 			t.Errorf("expected %s at index %d, got %s", exp, i, result[i])
@@ -67,12 +67,31 @@ func TestParseProviders_Invalid(t *testing.T) {
 }
 
 func TestParseProviders_NoLocalFilter(t *testing.T) {
-	result, err := parseProviders("local,firecrawl,local", true, false)
+	result, err := parseProviders("local,firecrawl,local", false, false)
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
-	if len(result) != 1 || result[0] != "firecrawl" {
-		t.Fatalf("expected [firecrawl], got %v", result)
+	if len(result) != 2 || result[0] != "local" || result[1] != "firecrawl" {
+		t.Fatalf("expected [local, firecrawl], got %v", result)
+	}
+}
+
+func TestParseProviders_AllWithLocal(t *testing.T) {
+	result, err := parseProviders("all", true, false)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
+	if len(result) != 6 {
+		t.Errorf("expected 6 providers for 'all' with -local, got %d", len(result))
+	}
+	hasLocal := false
+	for _, p := range result {
+		if p == "local" {
+			hasLocal = true
+		}
+	}
+	if !hasLocal {
+		t.Error("expected local in provider list when -local flag is set")
 	}
 }
 
@@ -81,8 +100,8 @@ func TestParseProviders_AllWithJina(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
-	if len(result) != 7 {
-		t.Errorf("expected 7 providers for 'all' with -jina, got %d", len(result))
+	if len(result) != 6 {
+		t.Errorf("expected 6 providers for 'all' with -jina, got %d", len(result))
 	}
 	hasJina := false
 	for _, p := range result {
