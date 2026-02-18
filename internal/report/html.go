@@ -64,12 +64,9 @@ func (g *Generator) GenerateHTML() error {
         .section { margin-bottom: 40px; }
         h2 { color: #2c3e50; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #3498db; }
         .quality-note { color: #666; margin: -8px 0 16px; font-size: 0.9em; }
-        .advanced-section { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; margin: 40px 0 30px 0; border-radius: 8px; }
-        .advanced-section h2 { color: white; border-bottom: 2px solid rgba(255,255,255,0.3); margin-bottom: 5px; }
-        .advanced-subtitle { font-size: 0.9em; opacity: 0.9; }
-        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .chart-grid .chart-container { margin-bottom: 0; }
-        .chart-grid .chart-wrapper { height: 350px; }
+        .chart-grid .chart-wrapper { height: 320px; }
         .heatmap-cell { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9em; border-radius: 4px; }
         .heatmap-excellent { background: #27ae60; color: white; }
         .heatmap-good { background: #2ecc71; color: white; }
@@ -146,7 +143,7 @@ func (g *Generator) GenerateHTML() error {
             </div>
         </div>
 
-` + g.generateQualitySection() + g.generateQualityByTestTypeSection() + g.generateAdvancedAnalyticsSection() + `
+` + g.generateQualitySection() + g.generateQualityByTestTypeSection() + g.generateSemanticRerankerSection() + g.generateAdvancedAnalyticsSection() + `
         <div class="section">
             <h2>Detailed Results</h2>
             <table>
@@ -279,6 +276,26 @@ func (g *Generator) generateQualityByTestTypeSection() string {
                 <tbody>` + rows.String() + `
                 </tbody>
             </table>
+        </div>
+
+`
+}
+
+// generateSemanticRerankerSection returns the semantic/reranker score chart HTML when data exists.
+func (g *Generator) generateSemanticRerankerSection() string {
+	providers := g.collector.GetAllProviders()
+	_, hasData := g.computeSemanticRerankerScores(providers)
+	if !hasData {
+		return ""
+	}
+	return `        <div class="section">
+            <h2>Search Scoring Breakdown: Semantic &amp; Reranker</h2>
+            <p class="quality-note">Embedding similarity (semantic) and reranker confidence scores for search tests. These are the two components that compose the blended search relevance score above.</p>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="semanticRerankerChart"></canvas>
+                </div>
+            </div>
         </div>
 
 `
@@ -466,9 +483,60 @@ func (g *Generator) generateChartScripts() string {
 `, joinStrings(providerNames), formatFloatSlice(searchRelevanceScores), joinStrings(colors), formatFloatSlice(extractHeuristicScores), formatFloatSlice(crawlHeuristicScores))
 	}
 
+	semanticRerankerScript := ""
+	if showQuality {
+		srData, hasSR := g.computeSemanticRerankerScores(providers)
+		if hasSR {
+			semScores := make([]float64, len(providers))
+			rerScores := make([]float64, len(providers))
+			for i, d := range srData {
+				semScores[i] = d.AvgSemantic
+				rerScores[i] = d.AvgReranker
+			}
+			semanticRerankerScript = fmt.Sprintf(`
+        // Semantic & Reranker Score Chart
+        new Chart(document.getElementById('semanticRerankerChart'), {
+            type: 'bar',
+            data: {
+                labels: [%s],
+                datasets: [
+                    {
+                        label: 'Semantic (Embedding Similarity)',
+                        data: [%s],
+                        backgroundColor: 'rgba(52, 152, 219, 0.75)',
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'Reranker Confidence',
+                        data: [%s],
+                        backgroundColor: 'rgba(155, 89, 182, 0.75)',
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true, position: 'bottom' },
+                    title: { display: true, text: 'Search Score Components: Embedding Similarity vs Reranker Confidence' }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: { display: true, text: 'Score (0-100)' }
+                    }
+                }
+            }
+        });
+`, joinStrings(providerNames), formatFloatSlice(semScores), formatFloatSlice(rerScores))
+		}
+	}
+
 	advancedScripts := g.generateAdvancedChartScripts(providers, providerNames, colors, baseColors)
 
-	return scoreChartScript + fmt.Sprintf(`
+	return scoreChartScript + semanticRerankerScript + fmt.Sprintf(`
         // Latency Chart
         new Chart(document.getElementById('latencyChart'), {
             type: 'bar',
@@ -572,6 +640,7 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 	radars := g.prepareRadarData(providers)
 	latencyDists := g.prepareLatencyDistributionData(providers)
 	scatterData := g.prepareScatterData(providers)
+	scaleBubbleSizes(scatterData)
 	errorData := g.prepareErrorBreakdownData(providers)
 	heatmapData := g.prepareHeatmapData(providers)
 	showQuality := g.hasQualityScores()
@@ -931,6 +1000,71 @@ type scatterData struct {
 	SuccessRate     float64
 }
 
+// scaleBubbleSizes normalizes raw bubble values to a 6-18px radius range.
+func scaleBubbleSizes(data []scatterData) {
+	var minVal, maxVal float64
+	first := true
+	for _, d := range data {
+		if first || d.BubbleSize < minVal {
+			minVal = d.BubbleSize
+		}
+		if first || d.BubbleSize > maxVal {
+			maxVal = d.BubbleSize
+		}
+		first = false
+	}
+	rng := maxVal - minVal
+	if rng == 0 {
+		rng = 1
+	}
+	for i := range data {
+		// Linear interpolation into [6, 18]
+		data[i].BubbleSize = 6 + (data[i].BubbleSize-minVal)/rng*12
+	}
+}
+
+// semanticRerankerData holds per-provider averages for search-only semantic/reranker scores.
+type semanticRerankerData struct {
+	AvgSemantic float64
+	AvgReranker float64
+	HasData     bool
+}
+
+// computeSemanticRerankerScores returns per-provider average semantic & reranker scores for search tests.
+func (g *Generator) computeSemanticRerankerScores(providers []string) ([]semanticRerankerData, bool) {
+	data := make([]semanticRerankerData, len(providers))
+	anyData := false
+	for i, p := range providers {
+		results := g.collector.GetResultsByProvider(p)
+		var semSum, rerSum float64
+		var semN, rerN int
+		for _, r := range results {
+			if r.TestType != "search" || r.Skipped || !r.Success {
+				continue
+			}
+			if r.SemanticScore > 0 {
+				semSum += r.SemanticScore
+				semN++
+			}
+			if r.RerankerScore > 0 {
+				rerSum += r.RerankerScore
+				rerN++
+			}
+		}
+		if semN > 0 {
+			data[i].AvgSemantic = semSum / float64(semN)
+			data[i].HasData = true
+			anyData = true
+		}
+		if rerN > 0 {
+			data[i].AvgReranker = rerSum / float64(rerN)
+			data[i].HasData = true
+			anyData = true
+		}
+	}
+	return data, anyData
+}
+
 // Error breakdown data
 type errorBreakdown struct {
 	Timeout         int
@@ -1049,7 +1183,7 @@ func (g *Generator) prepareScatterData(providers []string) []scatterData {
 			CostPerResult:   s.CostPerResult,
 			SearchRelevance: g.computeProviderQualityByTestType(p).Search.AvgQuality,
 			Speed:           float64(s.AvgLatency.Milliseconds()),
-			BubbleSize:      float64(totalResults) * 2, // Scale bubble size
+			BubbleSize:      float64(totalResults),
 			SuccessRate:     s.SuccessRate,
 		}
 	}
@@ -1325,13 +1459,13 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
 		return ""
 	}
 
-	return `        <div class="advanced-section">
+	return `        <div class="section">
             <h2>Advanced Analytics</h2>
-            <div class="advanced-subtitle">Multi-dimensional performance analysis & comparative insights</div>
         </div>
 
         <div class="section">
-            <h2>Provider Performance Profile (Radar Chart)</h2>
+            <h2>Provider Performance Profile</h2>
+            <p class="quality-note">All dimensions normalized to 0-100 scale (higher is better). Speed and cost are inverted so higher = faster/cheaper.</p>
             <div class="chart-container">
                 <div class="chart-wrapper" style="height: 450px;">
                     <canvas id="radarChart"></canvas>
@@ -1340,7 +1474,8 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
         </div>
 
         <div class="section">
-            <h2>Latency Distribution Analysis</h2>
+            <h2>Latency Distribution</h2>
+            <p class="quality-note">Stacked bars show Min→P50, P50→P95, and P95→Max latency ranges per provider.</p>
             <div class="chart-container">
                 <div class="chart-wrapper">
                     <canvas id="latencyDistChart"></canvas>
@@ -1349,28 +1484,23 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
         </div>
 
         <div class="section">
-            <h2>Cost vs Search Relevance</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper" style="height: 400px;">
-                    <canvas id="costQualityScatter"></canvas>
+            <h2>Trade-off Analysis</h2>
+            <p class="quality-note">Bubble size reflects total successful results returned. Ideal positions: bottom-left for cost charts, top-left for speed charts.</p>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <div class="chart-wrapper">
+                        <canvas id="costQualityScatter"></canvas>
+                    </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Speed vs Search Relevance</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper" style="height: 400px;">
-                    <canvas id="speedQualityScatter"></canvas>
+                <div class="chart-container">
+                    <div class="chart-wrapper">
+                        <canvas id="speedQualityScatter"></canvas>
+                    </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Cost vs Speed Analysis</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper" style="height: 400px;">
-                    <canvas id="costSpeedScatter"></canvas>
+                <div class="chart-container">
+                    <div class="chart-wrapper">
+                        <canvas id="costSpeedScatter"></canvas>
+                    </div>
                 </div>
             </div>
         </div>

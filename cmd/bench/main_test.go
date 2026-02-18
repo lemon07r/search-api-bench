@@ -11,14 +11,14 @@ import (
 )
 
 func TestParseProviders_All(t *testing.T) {
-	result, err := parseProviders("all", false)
+	result, err := parseProviders("all", false, false)
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
-	if len(result) != 7 {
-		t.Errorf("expected 7 providers for 'all', got %d", len(result))
+	if len(result) != 6 {
+		t.Errorf("expected 6 providers for 'all' (Jina excluded by default), got %d", len(result))
 	}
-	expected := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread", "jina"}
+	expected := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread"}
 	for i, exp := range expected {
 		if result[i] != exp {
 			t.Errorf("expected %s at index %d, got %s", exp, i, result[i])
@@ -27,7 +27,7 @@ func TestParseProviders_All(t *testing.T) {
 }
 
 func TestParseProviders_Single(t *testing.T) {
-	result, err := parseProviders("firecrawl", false)
+	result, err := parseProviders("firecrawl", false, false)
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestParseProviders_Single(t *testing.T) {
 }
 
 func TestParseProviders_List(t *testing.T) {
-	result, err := parseProviders("firecrawl,tavily", false)
+	result, err := parseProviders("firecrawl,tavily", false, false)
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
@@ -53,26 +53,55 @@ func TestParseProviders_List(t *testing.T) {
 }
 
 func TestParseProviders_Empty(t *testing.T) {
-	_, err := parseProviders("", false)
+	_, err := parseProviders("", false, false)
 	if err == nil {
 		t.Fatal("expected error for empty providers")
 	}
 }
 
 func TestParseProviders_Invalid(t *testing.T) {
-	_, err := parseProviders("firecrawl,unknown", false)
+	_, err := parseProviders("firecrawl,unknown", false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid provider")
 	}
 }
 
 func TestParseProviders_NoLocalFilter(t *testing.T) {
-	result, err := parseProviders("local,firecrawl,local", true)
+	result, err := parseProviders("local,firecrawl,local", true, false)
 	if err != nil {
 		t.Fatalf("parseProviders returned error: %v", err)
 	}
 	if len(result) != 1 || result[0] != "firecrawl" {
 		t.Fatalf("expected [firecrawl], got %v", result)
+	}
+}
+
+func TestParseProviders_AllWithJina(t *testing.T) {
+	result, err := parseProviders("all", false, true)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
+	if len(result) != 7 {
+		t.Errorf("expected 7 providers for 'all' with -jina, got %d", len(result))
+	}
+	hasJina := false
+	for _, p := range result {
+		if p == "jina" {
+			hasJina = true
+		}
+	}
+	if !hasJina {
+		t.Error("expected jina in provider list when -jina flag is set")
+	}
+}
+
+func TestParseProviders_ExplicitJinaWithoutFlag(t *testing.T) {
+	result, err := parseProviders("jina", false, false)
+	if err != nil {
+		t.Fatalf("parseProviders returned error: %v", err)
+	}
+	if len(result) != 1 || result[0] != "jina" {
+		t.Fatalf("expected [jina], got %v", result)
 	}
 }
 

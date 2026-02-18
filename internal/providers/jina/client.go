@@ -29,14 +29,14 @@ const (
 	searchBaseURL  = "https://s.jina.ai"
 	defaultTimeout = 30 * time.Second
 	// defaultSearchTimeout bounds each individual search attempt.
-	// Kept lower to reduce spend on slow responses by default.
-	defaultSearchTimeout = 12 * time.Second
+	// Set high enough to avoid timeouts on Jina's search API which can be slow.
+	defaultSearchTimeout = 30 * time.Second
 
 	defaultSearchMaxResults      = 10
 	defaultSearchMaxRetries      = 0
 	defaultExtractMaxRetries     = 0
 	defaultExtractTokenBudget    = 6000
-	defaultCrawlTokenBudget      = 4000
+	defaultCrawlTokenBudget      = 6000
 	defaultSearchNoContent       = true
 	defaultEnableImageCaptioning = false
 

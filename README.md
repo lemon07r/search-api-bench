@@ -52,27 +52,30 @@ FIRECRAWL_API_KEY=your_key
 TAVILY_API_KEY=your_key
 BRAVE_API_KEY=your_key
 EXA_API_KEY=your_key
-JINA_API_KEY=your_key                # Recommended: Jina search may require auth
+JINA_API_KEY=your_key                # Only needed if using -jina flag
 MXB_API_KEY=your_key                 # Preferred for Mixedbread
 # MIXEDBREAD_API_KEY=your_key        # Also supported
 
-# Optional Jina tuning (cost/reliability tradeoffs)
-# Defaults are cost-safe:
+# Optional Jina tuning (only relevant with -jina flag)
+# ⚠️  Jina is excluded by default because its token-based billing makes it
+#    significantly more expensive than other providers for equivalent operations.
+#    Use -jina to opt in.
+# Defaults:
 # - search no-content mode enabled
 # - search max results: 10
 # - search retries: 0
 # - extract/crawl retries: 0
 # - extract token budget: 6000
-# - crawl token budget: 4000
-# - search timeout: 12s
+# - crawl token budget: 6000
+# - search timeout: 30s
 # - generated image captions disabled
 JINA_SEARCH_NO_CONTENT=true
 JINA_SEARCH_MAX_RESULTS=10
-JINA_SEARCH_TIMEOUT=12s
+JINA_SEARCH_TIMEOUT=30s
 JINA_SEARCH_MAX_RETRIES=0
 JINA_EXTRACT_MAX_RETRIES=0
 JINA_EXTRACT_TOKEN_BUDGET=6000
-JINA_CRAWL_TOKEN_BUDGET=4000
+JINA_CRAWL_TOKEN_BUDGET=6000
 JINA_WITH_GENERATED_ALT=false
 
 # Optional scoring diagnostics
@@ -130,9 +133,9 @@ Notes:
 | Tavily | yes | yes | yes | `TAVILY_API_KEY` | Search/extract native; crawl emulated (map+extract) |
 | Brave | yes | yes | yes | `BRAVE_API_KEY` | Search native; extract/crawl emulated |
 | Exa | yes | yes | yes | `EXA_API_KEY` | Search/extract native; crawl emulated |
-| Jina | yes | yes | yes | `JINA_API_KEY` (recommended) | Search/extract native; crawl emulated |
 | Mixedbread | yes | yes | yes | `MXB_API_KEY` or `MIXEDBREAD_API_KEY` | Search native; extract/crawl emulated |
 | Local | no | yes | yes | none | Search unsupported; extract/crawl native local engine |
+| **Jina** ⚠️ | yes | yes | yes | `JINA_API_KEY` | **Opt-in only** (`-jina` flag). Token-based billing is significantly more expensive than other providers. Search/extract native; crawl emulated |
 
 Primary comparable rankings use normalized mode and native-capability operation results only.
 
@@ -145,11 +148,15 @@ Primary comparable rankings use normalized mode and native-capability operation 
 ### Common commands
 
 ```bash
-# All providers selected by default
+# All default providers (excludes Jina)
 ./build/search-api-bench
 
 # Specific providers
 ./build/search-api-bench -providers firecrawl,tavily
+
+# Include Jina (opt-in, high cost)
+./build/search-api-bench -jina
+./build/search-api-bench -providers jina    # Jina only
 
 # Exclude local provider even when using all
 ./build/search-api-bench -providers all -no-local
@@ -194,10 +201,13 @@ Primary comparable rankings use normalized mode and native-capability operation 
 | `-no-progress` | Disable progress bar | `false` |
 | `-no-search` | Exclude search tests | `false` |
 | `-no-local` | Exclude local provider | `false` |
+| `-jina` | Include Jina provider (excluded by default due to high cost) | `false` |
 
 ### Validation behavior
 
 - `-providers` accepts only: `all, firecrawl, tavily, local, brave, exa, mixedbread, jina`.
+- `all` expands to all providers **except** Jina (use `-jina` to include it).
+- Jina can still be selected explicitly with `-providers jina` without the `-jina` flag.
 - Provider list entries are normalized (trim + lowercase) and deduplicated.
 - Empty entries or invalid names return an error.
 - If filters result in zero providers (for example `-providers local -no-local`), execution stops with an error.
@@ -283,9 +293,9 @@ Pricing was verified against official docs on the date above; always re-check be
 | Tavily | ~$0.01-0.02 | 1,000 credits/month | $0.008/credit |
 | Brave | ~$0.03-0.07 | 2,000 queries/month | $0.005/req ($5/1K) |
 | Exa | ~$0.03-0.15 | $10 credits | $0.005/search, $0.001/page |
-| Jina | ~$0.001-0.01 | 10M tokens | $0.02/M tokens (min 10K/search) |
 | Mixedbread | ~$0.05-0.10 | 1,000 files | $0.0075/query ($7.50/1K with rerank) |
 | Local | Free | Unlimited | N/A |
+| **Jina** ⚠️ | ~$0.05-0.20 | 10M tokens | $0.02/M tokens (min 10K/search). Opt-in only (`-jina`); substantially more expensive than other providers for equivalent operations |
 
 Always verify current pricing and quotas before large runs:
 
