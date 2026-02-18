@@ -640,7 +640,6 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 	radars := g.prepareRadarData(providers)
 	latencyDists := g.prepareLatencyDistributionData(providers)
 	scatterData := g.prepareScatterData(providers)
-	scaleBubbleSizes(scatterData)
 	errorData := g.prepareErrorBreakdownData(providers)
 	heatmapData := g.prepareHeatmapData(providers)
 	showQuality := g.hasQualityScores()
@@ -672,11 +671,13 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 		color := baseColors[i%len(baseColors)]
 		scatterDatasets += fmt.Sprintf(`{
                     label: '%s',
-                    data: [{x: %f, y: %f, r: %f}],
+                    data: [{x: %f, y: %f}],
                     backgroundColor: %s,
                     borderColor: %s,
-                    borderWidth: 2
-                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].SearchRelevance, scatterData[i].BubbleSize, color, color)
+                    borderWidth: 2,
+                    pointRadius: 8,
+                    pointHoverRadius: 11
+                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].SearchRelevance, color, color)
 	}
 	scatterDatasets = strings.TrimSuffix(scatterDatasets, ",")
 
@@ -686,11 +687,13 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 		color := baseColors[i%len(baseColors)]
 		speedQualityDatasets += fmt.Sprintf(`{
                     label: '%s',
-                    data: [{x: %f, y: %f, r: %f}],
+                    data: [{x: %f, y: %f}],
                     backgroundColor: %s,
                     borderColor: %s,
-                    borderWidth: 2
-                },`, capitalize(p), scatterData[i].Speed, scatterData[i].SearchRelevance, scatterData[i].BubbleSize, color, color)
+                    borderWidth: 2,
+                    pointRadius: 8,
+                    pointHoverRadius: 11
+                },`, capitalize(p), scatterData[i].Speed, scatterData[i].SearchRelevance, color, color)
 	}
 	speedQualityDatasets = strings.TrimSuffix(speedQualityDatasets, ",")
 
@@ -700,11 +703,13 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 		color := baseColors[i%len(baseColors)]
 		costSpeedDatasets += fmt.Sprintf(`{
                     label: '%s',
-                    data: [{x: %f, y: %f, r: %f}],
+                    data: [{x: %f, y: %f}],
                     backgroundColor: %s,
                     borderColor: %s,
-                    borderWidth: 2
-                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].Speed, scatterData[i].BubbleSize, color, color)
+                    borderWidth: 2,
+                    pointRadius: 8,
+                    pointHoverRadius: 11
+                },`, capitalize(p), scatterData[i].CostPerResult, scatterData[i].Speed, color, color)
 	}
 	costSpeedDatasets = strings.TrimSuffix(costSpeedDatasets, ",")
 
@@ -713,6 +718,9 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 
 	// Heatmap generation
 	heatmapScript := g.generateHeatmapScript(providers, heatmapData)
+
+	// Compute quadrant midpoints (median of each axis)
+	costMid, speedMid, relevanceMid := computeQuadrantMidpoints(scatterData)
 
 	searchRelevanceRadarLabel := ""
 	if showQuality {
@@ -799,21 +807,68 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
             }
         });
 
+        // Quadrant background plugin for scatter plots
+        const quadrantPlugin = {
+            id: 'quadrantBackground',
+            beforeDraw(chart) {
+                const opts = chart.options.plugins.quadrantBackground;
+                if (!opts) return;
+                const {ctx, chartArea: {left, top, right, bottom}, scales: {x, y}} = chart;
+                const midX = x.getPixelForValue(opts.xMid);
+                const midY = y.getPixelForValue(opts.yMid);
+                const clampX = Math.max(left, Math.min(right, midX));
+                const clampY = Math.max(top, Math.min(bottom, midY));
+
+                ctx.save();
+                // Sweet-spot quadrant (low cost/fast + high quality)
+                ctx.fillStyle = opts.sweetSpot || 'rgba(46, 204, 113, 0.08)';
+                if (opts.sweetCorner === 'topLeft') {
+                    ctx.fillRect(left, top, clampX - left, clampY - top);
+                } else if (opts.sweetCorner === 'bottomLeft') {
+                    ctx.fillRect(left, clampY, clampX - left, bottom - clampY);
+                }
+
+                // Worst quadrant (opposite corner)
+                ctx.fillStyle = opts.worst || 'rgba(231, 76, 60, 0.06)';
+                if (opts.sweetCorner === 'topLeft') {
+                    ctx.fillRect(clampX, clampY, right - clampX, bottom - clampY);
+                } else if (opts.sweetCorner === 'bottomLeft') {
+                    ctx.fillRect(clampX, top, right - clampX, clampY - top);
+                }
+
+                // Draw crosshair lines
+                ctx.strokeStyle = 'rgba(0,0,0,0.10)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(clampX, top); ctx.lineTo(clampX, bottom);
+                ctx.moveTo(left, clampY); ctx.lineTo(right, clampY);
+                ctx.stroke();
+                ctx.restore();
+            }
+        };
+        Chart.register(quadrantPlugin);
+
         // Cost vs Search Relevance Scatter Plot
         new Chart(document.getElementById('costQualityScatter'), {
-            type: 'bubble',
+            type: 'scatter',
             data: { datasets: [%s] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                layout: { padding: 30 },
                 plugins: {
-                    title: { display: true, text: 'Cost vs Search Relevance (Bubble size = Results count)' },
+                    title: { display: true, text: 'Cost vs Search Relevance', font: { size: 14 } },
                     legend: { display: true, position: 'bottom' },
+                    quadrantBackground: {
+                        xMid: %s, yMid: %s,
+                        sweetCorner: 'topLeft',
+                        sweetSpot: 'rgba(46, 204, 113, 0.08)',
+                        worst: 'rgba(231, 76, 60, 0.06)'
+                    },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return context.dataset.label + ': Cost $' + context.raw.x.toFixed(4) + ', Search relevance ' + context.raw.y.toFixed(1);
+                                return context.dataset.label + ': $' + context.raw.x.toFixed(4) + ', relevance ' + context.raw.y.toFixed(1);
                             }
                         }
                     }
@@ -821,12 +876,12 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 scales: {
                     x: {
                         title: { display: true, text: 'Cost per Result (USD)' },
-                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } }
+                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } },
+                        beginAtZero: true
                     },
                     y: {
-                        title: { display: true, text: 'Search Relevance' },
-                        min: 0,
-                        max: 110
+                        title: { display: true, text: 'Search Relevance (0-100)' },
+                        min: 0, max: 100
                     }
                 }
             }
@@ -834,19 +889,24 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 
         // Speed vs Search Relevance Scatter Plot
         new Chart(document.getElementById('speedQualityScatter'), {
-            type: 'bubble',
+            type: 'scatter',
             data: { datasets: [%s] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                layout: { padding: 30 },
                 plugins: {
-                    title: { display: true, text: 'Speed vs Search Relevance (Bubble size = Results count)' },
+                    title: { display: true, text: 'Speed vs Search Relevance', font: { size: 14 } },
                     legend: { display: true, position: 'bottom' },
+                    quadrantBackground: {
+                        xMid: %s, yMid: %s,
+                        sweetCorner: 'topLeft',
+                        sweetSpot: 'rgba(46, 204, 113, 0.08)',
+                        worst: 'rgba(231, 76, 60, 0.06)'
+                    },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return context.dataset.label + ': Speed ' + context.raw.x.toFixed(0) + 'ms, Search relevance ' + context.raw.y.toFixed(1);
+                                return context.dataset.label + ': ' + context.raw.x.toFixed(0) + 'ms, relevance ' + context.raw.y.toFixed(1);
                             }
                         }
                     }
@@ -854,12 +914,11 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 scales: {
                     x: {
                         title: { display: true, text: 'Average Latency (ms)' },
-                        reverse: true
+                        beginAtZero: true
                     },
                     y: {
-                        title: { display: true, text: 'Search Relevance' },
-                        min: 0,
-                        max: 110
+                        title: { display: true, text: 'Search Relevance (0-100)' },
+                        min: 0, max: 100
                     }
                 }
             }
@@ -867,19 +926,24 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 
         // Cost vs Speed Scatter Plot
         new Chart(document.getElementById('costSpeedScatter'), {
-            type: 'bubble',
+            type: 'scatter',
             data: { datasets: [%s] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                layout: { padding: 30 },
                 plugins: {
-                    title: { display: true, text: 'Cost vs Speed Trade-off (Bubble size = Success Rate)' },
+                    title: { display: true, text: 'Cost vs Speed', font: { size: 14 } },
                     legend: { display: true, position: 'bottom' },
+                    quadrantBackground: {
+                        xMid: %s, yMid: %s,
+                        sweetCorner: 'bottomLeft',
+                        sweetSpot: 'rgba(46, 204, 113, 0.08)',
+                        worst: 'rgba(231, 76, 60, 0.06)'
+                    },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return context.dataset.label + ': Cost $' + context.raw.x.toFixed(4) + ', Speed ' + context.raw.y.toFixed(0) + 'ms';
+                                return context.dataset.label + ': $' + context.raw.x.toFixed(4) + ', ' + context.raw.y.toFixed(0) + 'ms';
                             }
                         }
                     }
@@ -887,11 +951,12 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
                 scales: {
                     x: {
                         title: { display: true, text: 'Cost per Result (USD)' },
-                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } }
+                        ticks: { callback: function(v) { return '$' + v.toFixed(4); } },
+                        beginAtZero: true
                     },
                     y: {
                         title: { display: true, text: 'Average Latency (ms)' },
-                        reverse: true
+                        beginAtZero: true
                     }
                 }
             }
@@ -929,9 +994,9 @@ func (g *Generator) generateAdvancedChartScripts(providers []string, providerNam
 		formatFloatSlice(latencyDistsToP50P95(latencyDists)), "'rgba(46, 204, 113, 0.8)'",
 		formatFloatSlice(latencyDistsToP95Max(latencyDists)), "'rgba(231, 76, 60, 0.8)'",
 		g.formatLatencyRanges(latencyDists),
-		scatterDatasets,
-		speedQualityDatasets,
-		costSpeedDatasets,
+		scatterDatasets, costMid, relevanceMid,
+		speedQualityDatasets, speedMid, relevanceMid,
+		costSpeedDatasets, costMid, speedMid,
 		joinStrings(providerNames),
 		errorDatasets,
 		heatmapScript)
@@ -991,36 +1056,43 @@ type latencyDist struct {
 	Avg float64
 }
 
-// Scatter plot data
+// scatterData holds per-provider aggregates for trade-off scatter plots.
 type scatterData struct {
 	CostPerResult   float64
 	SearchRelevance float64
 	Speed           float64
-	BubbleSize      float64
 	SuccessRate     float64
 }
 
-// scaleBubbleSizes normalizes raw bubble values to a 6-18px radius range.
-func scaleBubbleSizes(data []scatterData) {
-	var minVal, maxVal float64
-	first := true
-	for _, d := range data {
-		if first || d.BubbleSize < minVal {
-			minVal = d.BubbleSize
+// computeQuadrantMidpoints returns median cost, speed, and relevance across
+// providers. These values position the quadrant crosshairs in scatter charts.
+func computeQuadrantMidpoints(data []scatterData) (costMid, speedMid, relevanceMid string) {
+	if len(data) == 0 {
+		return "0", "0", "50"
+	}
+	costs := make([]float64, len(data))
+	speeds := make([]float64, len(data))
+	relevances := make([]float64, len(data))
+	for i, d := range data {
+		costs[i] = d.CostPerResult
+		speeds[i] = d.Speed
+		relevances[i] = d.SearchRelevance
+	}
+	sort.Float64s(costs)
+	sort.Float64s(speeds)
+	sort.Float64s(relevances)
+
+	median := func(s []float64) float64 {
+		n := len(s)
+		if n%2 == 0 {
+			return (s[n/2-1] + s[n/2]) / 2
 		}
-		if first || d.BubbleSize > maxVal {
-			maxVal = d.BubbleSize
-		}
-		first = false
+		return s[n/2]
 	}
-	rng := maxVal - minVal
-	if rng == 0 {
-		rng = 1
-	}
-	for i := range data {
-		// Linear interpolation into [6, 18]
-		data[i].BubbleSize = 6 + (data[i].BubbleSize-minVal)/rng*12
-	}
+
+	return fmt.Sprintf("%.6f", median(costs)),
+		fmt.Sprintf("%.1f", median(speeds)),
+		fmt.Sprintf("%.1f", median(relevances))
 }
 
 // semanticRerankerData holds per-provider averages for search-only semantic/reranker scores.
@@ -1169,21 +1241,11 @@ func (g *Generator) prepareScatterData(providers []string) []scatterData {
 
 	for i, p := range providers {
 		s := g.collector.ComputeSummary(p)
-		results := g.collector.GetResultsByProvider(p)
-
-		// Calculate total successful results for bubble size
-		var totalResults int
-		for _, r := range results {
-			if r.Success {
-				totalResults += r.ResultsCount
-			}
-		}
 
 		data[i] = scatterData{
 			CostPerResult:   s.CostPerResult,
 			SearchRelevance: g.computeProviderQualityByTestType(p).Search.AvgQuality,
 			Speed:           float64(s.AvgLatency.Milliseconds()),
-			BubbleSize:      float64(totalResults),
 			SuccessRate:     s.SuccessRate,
 		}
 	}
@@ -1485,7 +1547,7 @@ func (g *Generator) generateAdvancedAnalyticsSection() string {
 
         <div class="section">
             <h2>Trade-off Analysis</h2>
-            <p class="quality-note">Bubble size reflects total successful results returned. Ideal positions: bottom-left for cost charts, top-left for speed charts.</p>
+            <p class="quality-note">Green quadrant = sweet spot (low cost/fast + high quality). Red quadrant = least desirable. Crosshairs at provider median values.</p>
             <div class="chart-grid">
                 <div class="chart-container">
                     <div class="chart-wrapper">
