@@ -44,7 +44,7 @@ With reports such as `report.html`, `report.md`, and `report.json`.
 
 The CLI auto-loads `.env` from project root if present.
 
-`.env.example` currently includes starter keys for Firecrawl/Tavily only. Add other keys manually as needed:
+`.env.example` includes all provider keys. Copy it to `.env` and fill in your keys:
 
 ```env
 # Cloud provider keys
@@ -118,7 +118,7 @@ max_depth = 2
 ```
 
 Notes:
-- `max_depth = 0` means start page only (no link expansion).
+- `max_depth = 0` behavior is provider-dependent: Firecrawl auto-calculates depth from the seed URL's path (e.g., `/3/tutorial/` → depth 2); other providers treat it as start page only (no link expansion).
 - `max_pages` and `max_depth` are optional; provider defaults are used if omitted.
 - `-no-search` removes all search tests at runtime.
 
@@ -127,9 +127,9 @@ Notes:
 | Provider | Search | Extract | Crawl | Env Var | Capability Notes |
 |---|---:|---:|---:|---|---|
 | Firecrawl | yes | yes | yes | `FIRECRAWL_API_KEY` | Native for all ops |
-| Tavily | yes | yes | yes | `TAVILY_API_KEY` | Native for all ops |
+| Tavily | yes | yes | yes | `TAVILY_API_KEY` | Search/extract native; crawl emulated (map+extract) |
 | Brave | yes | yes | yes | `BRAVE_API_KEY` | Search native; extract/crawl emulated |
-| Exa | yes | yes | yes | `EXA_API_KEY` | Native for all ops |
+| Exa | yes | yes | yes | `EXA_API_KEY` | Search/extract native; crawl emulated |
 | Jina | yes | yes | yes | `JINA_API_KEY` (recommended) | Search/extract native; crawl emulated |
 | Mixedbread | yes | yes | yes | `MXB_API_KEY` or `MIXEDBREAD_API_KEY` | Search native; extract/crawl emulated |
 | Local | no | yes | yes | none | Search unsupported; extract/crawl native local engine |
@@ -272,19 +272,20 @@ These internal packages can be reused in custom tools:
 
 See package APIs in source for usage examples.
 
-## Pricing and Free-Tier Notes (As of February 9, 2026)
+## Pricing and Free-Tier Notes (As of February 17, 2026)
 
 The table below is an operational estimate from benchmark usage patterns, not a billing guarantee.
+Pricing was verified against official docs on the date above; always re-check before large runs.
 
-| Provider | Estimated Cost per Full Default Run (13 tests) | Free Tier (approx) |
-|---|---:|---:|
-| Firecrawl | ~$0.05-0.08 | 500 credits |
-| Tavily | ~$0.01-0.02 | 1,000 credits/month |
-| Brave | ~$0.03 | 2,000 queries/month |
-| Exa | ~$0.03-0.15 | $10 credits |
-| Jina | ~$0.001-0.01 | 10M tokens |
-| Mixedbread | ~$0.01-0.03 | 1,000 files |
-| Local | Free | Unlimited |
+| Provider | Estimated Cost per Full Default Run (13 tests) | Free Tier (approx) | Unit & Rate |
+|---|---:|---:|---|
+| Firecrawl | ~$0.05-0.08 | 500 credits | $0.005/credit |
+| Tavily | ~$0.01-0.02 | 1,000 credits/month | $0.008/credit |
+| Brave | ~$0.03-0.07 | 2,000 queries/month | $0.005/req ($5/1K) |
+| Exa | ~$0.03-0.15 | $10 credits | $0.005/search, $0.001/page |
+| Jina | ~$0.001-0.01 | 10M tokens | $0.02/M tokens (min 10K/search) |
+| Mixedbread | ~$0.05-0.10 | 1,000 files | $0.0075/query ($7.50/1K with rerank) |
+| Local | Free | Unlimited | N/A |
 
 Always verify current pricing and quotas before large runs:
 
