@@ -92,6 +92,23 @@ If `-quality` is enabled, all 4 required `EMBEDDING_*`/`RERANKER_*` base URL + k
 Search scoring uses ground-truth metrics when provided (`expected_*` fields), optionally blended with model-assisted signals when `-quality` is enabled.
 Extract/crawl scoring also uses ground-truth-aware checks when expectations are present.
 
+#### How scoring works
+
+**Search Relevance (Model-Assisted)** is a weighted composite of 5 sub-scores, all normalized to 0-100:
+
+| Component | Weight | Source |
+|---|---|---|
+| Semantic Relevance | 35% | Cosine similarity between query embedding and each result's text (Qwen3-Embedding-8B, 4096-dim). Averaged across results. |
+| Reranker Score | 25% | Qwen3-Reranker-8B scores each result against the query. Raw scores auto-normalized to 0-100. Averaged. |
+| Authority Score | 20% | Domain lookup table (wikipedia=100, github=95, medium=70, unknown=50). Averaged. |
+| Result Diversity | 10% | Shannon entropy of domain distribution. All-same-domain = 0, max spread = 100. |
+| Freshness Score | 10% | Age-based buckets (<1 day=100, <1 week=90, ..., unknown=50). Averaged. |
+
+If either AI model (semantic/reranker) is unavailable, its weight drops to 0 and remaining weights renormalize.
+When ground-truth test config fields exist (`expected_topics`, `must_include_terms`, etc.), the final score blends 70% ground-truth + 30% model score; otherwise the model score is used directly.
+
+**Extract and Crawl** scores are rule-based heuristics that check content completeness and structure (not model-assisted).
+
 ### Test Configuration (`config.toml`)
 
 ```toml
@@ -148,18 +165,19 @@ Primary comparable rankings use normalized mode and native-capability operation 
 ### Common commands
 
 ```bash
-# All default providers (excludes Jina)
+# All default providers (excludes Local and Jina)
 ./build/search-api-bench
 
 # Specific providers
 ./build/search-api-bench -providers firecrawl,tavily
 
+# Include Local provider (opt-in, no API key needed)
+./build/search-api-bench -local
+./build/search-api-bench -providers local    # Local only
+
 # Include Jina (opt-in, high cost)
 ./build/search-api-bench -jina
 ./build/search-api-bench -providers jina    # Jina only
-
-# Exclude local provider even when using all
-./build/search-api-bench -providers all -no-local
 
 # Output only markdown + json
 ./build/search-api-bench -format md,json
@@ -200,17 +218,17 @@ Primary comparable rankings use normalized mode and native-capability operation 
 | `-debug-full` | Full body capture + timing breakdown | `false` |
 | `-no-progress` | Disable progress bar | `false` |
 | `-no-search` | Exclude search tests | `false` |
-| `-no-local` | Exclude local provider | `false` |
+| `-local` | Include local provider (excluded by default) | `false` |
 | `-jina` | Include Jina provider (excluded by default due to high cost) | `false` |
 
 ### Validation behavior
 
 - `-providers` accepts only: `all, firecrawl, tavily, local, brave, exa, mixedbread, jina`.
-- `all` expands to all providers **except** Jina (use `-jina` to include it).
-- Jina can still be selected explicitly with `-providers jina` without the `-jina` flag.
+- `all` expands to all providers **except** Local and Jina (use `-local` / `-jina` to include them).
+- Local and Jina can still be selected explicitly with `-providers local` or `-providers jina` without the opt-in flags.
 - Provider list entries are normalized (trim + lowercase) and deduplicated.
 - Empty entries or invalid names return an error.
-- If filters result in zero providers (for example `-providers local -no-local`), execution stops with an error.
+- If filters result in zero providers, execution stops with an error.
 - `-format` accepts only: `all, html, md, json`.
 - `-format all` cannot be combined with other formats.
 - `-mode` accepts only: `normalized, native`.

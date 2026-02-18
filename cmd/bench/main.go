@@ -40,7 +40,7 @@ type cliFlags struct {
 	debugFullMode    *bool
 	quickMode        *bool
 	noSearch         *bool
-	noLocal          *bool
+	includeLocal     *bool
 	qualityMode      *bool
 	includeJina      *bool
 }
@@ -59,7 +59,7 @@ func parseFlags() *cliFlags {
 		debugFullMode:    flag.Bool("debug-full", false, "Enable full debug logging with complete request/response bodies and timing breakdown"),
 		quickMode:        flag.Bool("quick", false, "Run quick test with reduced test set and shorter timeouts"),
 		noSearch:         flag.Bool("no-search", false, "Exclude search tests"),
-		noLocal:          flag.Bool("no-local", false, "Exclude local provider"),
+		includeLocal:     flag.Bool("local", false, "Include local provider (excluded by default)"),
 		qualityMode:      flag.Bool("quality", false, "Enable relevance/scoring metrics (search model-assisted + extract/crawl heuristics; requires EMBEDDING_* and RERANKER_* env vars)"),
 		includeJina:      flag.Bool("jina", false, "Include Jina provider (excluded by default due to high cost and slow search)"),
 	}
@@ -90,7 +90,7 @@ func main() {
 
 	loadEnvFile()
 
-	providerNames, err := parseProviders(*flags.providersFlag, *flags.noLocal, *flags.includeJina)
+	providerNames, err := parseProviders(*flags.providersFlag, *flags.includeLocal, *flags.includeJina)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing providers: %v\n", err)
 		os.Exit(1)
@@ -422,9 +422,9 @@ func initializeQualityScorer() (*quality.Scorer, error) {
 	return scorer, nil
 }
 
-func parseProviders(s string, noLocal bool, includeJina bool) ([]string, error) {
-	// Default providers excludes Jina (opt-in only due to high cost).
-	defaultProviders := []string{"firecrawl", "tavily", "local", "brave", "exa", "mixedbread"}
+func parseProviders(s string, includeLocal bool, includeJina bool) ([]string, error) {
+	// Default providers excludes Local (opt-in, no API key needed) and Jina (opt-in, high cost).
+	defaultProviders := []string{"firecrawl", "tavily", "brave", "exa", "mixedbread"}
 	validProviders := map[string]struct{}{
 		"firecrawl":  {},
 		"tavily":     {},
@@ -444,6 +444,9 @@ func parseProviders(s string, noLocal bool, includeJina bool) ([]string, error) 
 	var selected []string
 	if input == "all" {
 		selected = append(selected, defaultProviders...)
+		if includeLocal {
+			selected = append(selected, "local")
+		}
 		if includeJina {
 			selected = append(selected, "jina")
 		}
@@ -468,16 +471,6 @@ func parseProviders(s string, noLocal bool, includeJina bool) ([]string, error) 
 		if len(invalid) > 0 {
 			return nil, fmt.Errorf("invalid provider(s): %s (valid values: all, %s)", strings.Join(invalid, ", "), strings.Join(allNames, ", "))
 		}
-	}
-
-	if noLocal {
-		filtered := make([]string, 0, len(selected))
-		for _, p := range selected {
-			if p != "local" {
-				filtered = append(filtered, p)
-			}
-		}
-		selected = filtered
 	}
 
 	if len(selected) == 0 {
