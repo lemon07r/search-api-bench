@@ -140,7 +140,7 @@ func (r *Runner) runTest(ctx context.Context, repeat int, test config.TestConfig
 		RunMode:             string(r.options.Mode),
 		Repeat:              repeat,
 		ImplementationType:  string(supportLevel),
-		ExcludedFromPrimary: supportLevel != providers.SupportNative || r.options.Mode != providers.ModeNormalized,
+		ExcludedFromPrimary: supportLevel != providers.SupportNative,
 		Timestamp:           time.Now(),
 	}
 

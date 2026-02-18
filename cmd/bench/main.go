@@ -212,10 +212,7 @@ func main() {
 	// Create runner with progress manager, debug logger, and optional quality scorer
 	runner := evaluator.NewRunner(cfg, provs, prog, debugLogger, scorer, runnerOpts)
 
-	// Print initial banner if not using progress bar
-	if *flags.noProgress {
-		printBanner()
-	}
+	// Banner already printed above; no second print needed.
 
 	// Run benchmarks
 	ctx := context.Background()

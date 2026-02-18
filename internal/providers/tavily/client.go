@@ -49,11 +49,12 @@ func (c *Client) Name() string {
 }
 
 // Capabilities returns Tavily operation support levels.
+// Crawl uses map+extract pattern (emulated), not native /crawl endpoint.
 func (c *Client) Capabilities() providers.CapabilitySet {
 	return providers.CapabilitySet{
 		Search:  providers.SupportNative,
 		Extract: providers.SupportNative,
-		Crawl:   providers.SupportNative,
+		Crawl:   providers.SupportEmulated,
 	}
 }
 
@@ -72,7 +73,6 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	}
 
 	payload := map[string]interface{}{
-		"api_key":        c.apiKey,
 		"query":          query,
 		"search_depth":   searchDepth,
 		"max_results":    opts.MaxResults,
@@ -91,7 +91,8 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 
 	reqURL := c.baseURL + "/search"
 	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
 	}, string(body))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
@@ -100,6 +101,7 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
@@ -161,7 +163,6 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	}
 
 	payload := map[string]interface{}{
-		"api_key":       c.apiKey,
 		"urls":          []string{url},
 		"extract_depth": extractDepth,
 	}
@@ -173,7 +174,8 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 
 	reqURL := c.baseURL + "/extract"
 	providers.LogRequest(ctx, "POST", reqURL, map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer [REDACTED]",
 	}, string(body))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(body))
@@ -182,6 +184,7 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
 	if err != nil {
@@ -204,8 +207,12 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 
 	r := result.Results[0]
 
-	// Tavily Extract: 1 credit per 5 successful extractions (basic)
+	// Tavily Extract credits: basic = 1 per 5 URLs, advanced = 2 per 5 URLs.
+	// For a single URL we round up to 1 credit (basic) or 2 credits (advanced).
 	creditsUsed := 1
+	if extractDepth == "advanced" {
+		creditsUsed = 2
+	}
 
 	return &providers.ExtractResult{
 		URL:          url,
@@ -219,15 +226,16 @@ func (c *Client) Extract(ctx context.Context, url string, opts providers.Extract
 	}, nil
 }
 
-// Crawl crawls a website using Tavily (uses map + extract)
+// Crawl crawls a website using Tavily (uses map + extract pattern).
+// This is an emulated crawl - Tavily has a native /crawl endpoint but
+// this implementation uses map to discover URLs then extract to fetch content.
 func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
 
 	// First, use Tavily Map to get URLs
 	payload := map[string]interface{}{
-		"api_key": c.apiKey,
-		"url":     url,
-		"limit":   opts.MaxPages,
+		"url":   url,
+		"limit": opts.MaxPages,
 	}
 
 	body, err := json.Marshal(payload)
@@ -247,7 +255,6 @@ func (c *Client) Crawl(ctx context.Context, url string, opts providers.CrawlOpti
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	// Some Tavily endpoints require Authorization header in addition to api_key in body
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
@@ -365,6 +372,5 @@ type extractResponse struct {
 }
 
 type mapResponse struct {
-	Links   []string `json:"links"`
 	Results []string `json:"results"`
 }

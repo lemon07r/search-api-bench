@@ -1,7 +1,7 @@
 // Package exa provides a client for the Exa AI Search API.
 // It implements the providers.Provider interface for benchmarking search, extract, and crawl operations.
 //
-// Exa offers AI-native search with three modes:
+// Exa offers AI-native search with multiple modes:
 // - Fast: <500ms latency, optimized for speed
 // - Auto: Balanced quality and speed (default)
 // - Deep: Agentic search with query expansion for highest quality
@@ -63,7 +63,7 @@ func (c *Client) Capabilities() providers.CapabilitySet {
 	return providers.CapabilitySet{
 		Search:  providers.SupportNative,
 		Extract: providers.SupportNative,
-		Crawl:   providers.SupportNative,
+		Crawl:   providers.SupportEmulated, // Uses search + contents, not native subpages
 	}
 }
 
@@ -75,10 +75,9 @@ func (c *Client) SupportsOperation(opType string) bool {
 // Search performs a web search using Exa AI API
 // Endpoint: POST /search
 // Native features leveraged:
-//   - Three search modes: fast, auto, deep
-//   - Query expansion for better results (deep mode)
-//   - Domain filtering
-//   - Full text content retrieval
+//   - Multiple search modes: fast, auto, deep
+//   - Content retrieval via contents object
+//   - Domain filtering via includeDomains
 func (c *Client) Search(ctx context.Context, query string, opts providers.SearchOptions) (*providers.SearchResult, error) {
 	start := time.Now()
 
@@ -93,13 +92,15 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		searchType = "auto"
 	}
 
-	// Build request payload
+	// Build request payload per Exa API spec
 	payload := map[string]interface{}{
-		"query":         query,
-		"type":          searchType,
-		"numResults":    min(opts.MaxResults, 100), // Max 100
-		"useAutoprompt": false,                     // Use exact query
-		"text":          true,                      // Get full text content
+		"query":      query,
+		"type":       searchType,
+		"numResults": min(opts.MaxResults, 100),
+		// Content retrieval must be nested in "contents" object
+		"contents": map[string]interface{}{
+			"text": true,
+		},
 	}
 
 	body, err := json.Marshal(payload)
@@ -137,10 +138,13 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 	providers.LogResponse(ctx, resp.StatusCode, providers.HeadersToMap(resp.Headers), string(resp.Body), len(resp.Body), latency)
 
 	// Convert Exa results to provider format
-	contextByURL, contextByTitle := parseExaContextBlocks(result.Context)
 	items := make([]providers.SearchItem, 0, len(result.Results))
 	for _, r := range result.Results {
-		content := selectExaSearchContent(r, result.Context, contextByURL, contextByTitle)
+		content := r.Text
+		if content == "" {
+			content = r.Summary
+		}
+
 		item := providers.SearchItem{
 			Title:   r.Title,
 			URL:     r.URL,
@@ -156,17 +160,20 @@ func (c *Client) Search(ctx context.Context, query string, opts providers.Search
 		items = append(items, item)
 	}
 
-	// Credits: 1 per request (estimated from docs)
-	creditsUsed := 1
+	// Use actual cost from API response when available, otherwise estimate
+	costUSD := result.CostDollars.Total
+	creditsUsed := 1 // Fallback for cost calculator
+	usageReported := costUSD > 0
 
 	return &providers.SearchResult{
-		Query:        query,
-		Results:      items,
-		TotalResults: len(items),
-		Latency:      latency,
-		CreditsUsed:  creditsUsed,
-		RequestCount: 1,
-		RawResponse:  resp.Body,
+		Query:         query,
+		Results:       items,
+		TotalResults:  len(items),
+		Latency:       latency,
+		CreditsUsed:   creditsUsed,
+		RequestCount:  1,
+		UsageReported: usageReported,
+		RawResponse:   resp.Body,
 	}, nil
 }
 
@@ -236,25 +243,25 @@ func (c *Client) Extract(ctx context.Context, pageURL string, opts providers.Ext
 		}
 	}
 
-	// Credits: 1 per request (estimated)
 	creditsUsed := 1
+	usageReported := result.CostDollars.Total > 0
 
 	return &providers.ExtractResult{
-		URL:          pageURL,
-		Title:        r.Title,
-		Content:      r.Text,
-		Markdown:     r.Text, // Exa returns clean text, treat as markdown
-		Metadata:     metadata,
-		Latency:      latency,
-		CreditsUsed:  creditsUsed,
-		RequestCount: 1,
+		URL:           pageURL,
+		Title:         r.Title,
+		Content:       r.Text,
+		Markdown:      r.Text, // Exa returns clean text, treat as markdown
+		Metadata:      metadata,
+		Latency:       latency,
+		CreditsUsed:   creditsUsed,
+		RequestCount:  1,
+		UsageReported: usageReported,
 	}, nil
 }
 
 // Crawl crawls a website using Exa AI
-// Strategy:
-// 1. Search for site:domain.com with higher numResults to discover URLs
-// 2. Use /contents to extract each discovered URL
+// Strategy: Use includeDomains to search for pages on the target domain,
+// then batch extract content via /contents endpoint.
 func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.CrawlOptions) (*providers.CrawlResult, error) {
 	start := time.Now()
 
@@ -270,24 +277,52 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 
 	domain := parsedURL.Host
 
-	// Step 1: Search for pages on this domain
-	searchQuery := fmt.Sprintf("site:%s", domain)
-	searchOpts := providers.DefaultSearchOptions()
-	searchOpts.MaxResults = opts.MaxPages * 3 // Request more to account for filtering
-	searchOpts.SearchDepth = "basic"          // Use fast search for URL discovery
+	// Step 1: Search for pages on this domain using includeDomains filter
+	searchPayload := map[string]interface{}{
+		"query":          parsedURL.Path, // Use path as query hint
+		"type":           "auto",
+		"numResults":     opts.MaxPages * 3, // Request more to account for filtering
+		"includeDomains": []string{domain},
+		"contents": map[string]interface{}{
+			"text": true,
+		},
+	}
 
-	searchResult, err := c.Search(ctx, searchQuery, searchOpts)
+	// If the path is just "/" or empty, use the domain as query
+	if parsedURL.Path == "" || parsedURL.Path == "/" {
+		searchPayload["query"] = domain
+	}
+
+	searchBody, err := json.Marshal(searchPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal search request: %w", err)
+	}
+
+	searchReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/search", bytes.NewReader(searchBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create search request: %w", err)
+	}
+
+	searchReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	searchReq.Header.Set("Content-Type", "application/json")
+
+	searchResp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, searchReq)
 	if err != nil {
 		// Fallback: just extract the starting URL
 		return c.crawlSinglePage(ctx, startURL, opts, start)
 	}
 
-	// Step 2: Collect URLs to extract
-	urls := make([]string, 0, opts.MaxPages)
+	var searchResult searchResponse
+	if err := json.Unmarshal(searchResp.Body, &searchResult); err != nil {
+		return c.crawlSinglePage(ctx, startURL, opts, start)
+	}
+
+	// Step 2: Collect pages (search already includes text content)
+	pages := make([]providers.CrawledPage, 0, opts.MaxPages)
 	visited := make(map[string]bool)
 
 	for _, item := range searchResult.Results {
-		if len(urls) >= opts.MaxPages {
+		if len(pages) >= opts.MaxPages {
 			break
 		}
 
@@ -306,96 +341,38 @@ func (c *Client) Crawl(ctx context.Context, startURL string, opts providers.Craw
 			continue
 		}
 
-		urls = append(urls, item.URL)
-	}
-
-	// If no URLs found, fallback to single page
-	if len(urls) == 0 {
-		return c.crawlSinglePage(ctx, startURL, opts, start)
-	}
-
-	// Step 3: Batch extract using /contents endpoint
-	creditsUsed := searchResult.CreditsUsed
-	pages := make([]providers.CrawledPage, 0, len(urls))
-
-	// Exa supports batch extraction - process in batches
-	batchSize := 10
-	for i := 0; i < len(urls); i += batchSize {
-		end := i + batchSize
-		if end > len(urls) {
-			end = len(urls)
-		}
-		batch := urls[i:end]
-
-		batchPages, batchCredits, err := c.extractBatch(ctx, batch)
-		if err != nil {
-			continue // Skip failed batches
+		content := item.Text
+		if content == "" {
+			content = item.Summary
 		}
 
-		pages = append(pages, batchPages...)
-		creditsUsed += batchCredits
+		pages = append(pages, providers.CrawledPage{
+			URL:      item.URL,
+			Title:    item.Title,
+			Content:  content,
+			Markdown: content,
+		})
 	}
 
+	// If no pages found, fallback to single page
 	if len(pages) == 0 {
 		return c.crawlSinglePage(ctx, startURL, opts, start)
 	}
 
 	latency := time.Since(start)
 
+	creditsUsed := 1 // Search request
+	usageReported := searchResult.CostDollars.Total > 0
+
 	return &providers.CrawlResult{
-		URL:          startURL,
-		Pages:        pages,
-		TotalPages:   len(pages),
-		Latency:      latency,
-		CreditsUsed:  creditsUsed,
-		RequestCount: 1 + ((len(urls) + batchSize - 1) / batchSize),
+		URL:           startURL,
+		Pages:         pages,
+		TotalPages:    len(pages),
+		Latency:       latency,
+		CreditsUsed:   creditsUsed,
+		RequestCount:  1,
+		UsageReported: usageReported,
 	}, nil
-}
-
-// extractBatch extracts content from multiple URLs using a single /contents call
-func (c *Client) extractBatch(ctx context.Context, urls []string) ([]providers.CrawledPage, int, error) {
-	payload := map[string]interface{}{
-		"urls": urls,
-		"text": true,
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/contents", bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.retryCfg.DoHTTPRequestDetailed(ctx, c.httpClient, req)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	var result contentsResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, 0, err
-	}
-
-	pages := make([]providers.CrawledPage, 0, len(result.Results))
-	for _, r := range result.Results {
-		pages = append(pages, providers.CrawledPage{
-			URL:      r.URL,
-			Title:    r.Title,
-			Content:  r.Text,
-			Markdown: r.Text,
-		})
-	}
-
-	// Credits: 1 per batch
-	creditsUsed := 1
-
-	return pages, creditsUsed, nil
 }
 
 // crawlSinglePage is a fallback that just extracts the starting URL
@@ -427,16 +404,17 @@ func (c *Client) crawlSinglePage(ctx context.Context, pageURL string, _ provider
 	}, nil
 }
 
-// Helper functions
-
 // Response types
 
+type costDollars struct {
+	Total float64 `json:"total,omitempty"`
+}
+
 type searchResponse struct {
-	RequestID        string         `json:"requestId"`
-	ResolvedType     string         `json:"resolvedSearchType,omitempty"`
-	Context          string         `json:"context,omitempty"`
-	Results          []exaSearchHit `json:"results"`
-	AutopromptString string         `json:"autopromptString,omitempty"`
+	RequestID   string         `json:"requestId"`
+	SearchType  string         `json:"searchType,omitempty"`
+	Results     []exaSearchHit `json:"results"`
+	CostDollars costDollars    `json:"costDollars,omitempty"`
 }
 
 type exaSearchHit struct {
@@ -444,7 +422,6 @@ type exaSearchHit struct {
 	URL           string  `json:"url"`
 	Text          string  `json:"text,omitempty"`
 	Summary       string  `json:"summary,omitempty"`
-	Snippet       string  `json:"snippet,omitempty"`
 	Score         float64 `json:"score,omitempty"`
 	PublishedDate string  `json:"publishedDate,omitempty"`
 	Author        string  `json:"author,omitempty"`
@@ -459,6 +436,7 @@ type contentsResponse struct {
 		Image      string   `json:"image,omitempty"`
 		Highlights []string `json:"highlights,omitempty"`
 	} `json:"results"`
+	CostDollars costDollars `json:"costDollars,omitempty"`
 }
 
 func parseExaPublishedAt(value string) (*time.Time, bool) {
@@ -478,79 +456,4 @@ func parseExaPublishedAt(value string) (*time.Time, bool) {
 		}
 	}
 	return nil, false
-}
-
-func selectExaSearchContent(result exaSearchHit, rawContext string, contextByURL, contextByTitle map[string]string) string {
-	candidates := []string{
-		result.Text,
-		result.Summary,
-		result.Snippet,
-		contextByURL[strings.TrimSpace(result.URL)],
-		contextByTitle[strings.TrimSpace(result.Title)],
-		rawContext,
-	}
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return ""
-}
-
-func parseExaContextBlocks(context string) (map[string]string, map[string]string) {
-	byURL := make(map[string]string)
-	byTitle := make(map[string]string)
-	context = strings.TrimSpace(context)
-	if context == "" {
-		return byURL, byTitle
-	}
-
-	type contextBlock struct {
-		title string
-		url   string
-		lines []string
-	}
-
-	var current *contextBlock
-	flushCurrent := func() {
-		if current == nil {
-			return
-		}
-		content := strings.TrimSpace(strings.Join(current.lines, "\n"))
-		if content == "" {
-			current = nil
-			return
-		}
-		if current.url != "" {
-			byURL[strings.TrimSpace(current.url)] = content
-		}
-		if current.title != "" {
-			byTitle[strings.TrimSpace(current.title)] = content
-		}
-		current = nil
-	}
-
-	for _, rawLine := range strings.Split(context, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if strings.HasPrefix(line, "Title: ") {
-			flushCurrent()
-			current = &contextBlock{
-				title: strings.TrimSpace(strings.TrimPrefix(line, "Title: ")),
-				lines: []string{line},
-			}
-			continue
-		}
-
-		if current == nil {
-			continue
-		}
-		current.lines = append(current.lines, line)
-		if strings.HasPrefix(line, "URL: ") {
-			current.url = strings.TrimSpace(strings.TrimPrefix(line, "URL: "))
-		}
-	}
-	flushCurrent()
-
-	return byURL, byTitle
 }

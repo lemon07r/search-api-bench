@@ -13,18 +13,19 @@ type CostCalculator struct {
 	// Tavily: $0.008 per credit (pay-as-you-go rate)
 	tavilyPerCredit float64
 
-	// Brave: $0.004 per request (average of Base $0.003 and Pro $0.005)
+	// Brave: $0.005 per request ($5 per 1,000 requests)
 	bravePerRequest float64
 
-	// Exa: $0.005 per search (1-25 results tier)
-	// Contents: $0.001 per page
+	// Exa: dollar-based pricing
+	// Search: $0.005 per search (1-25 results, fast/neural)
+	// Contents: $0.001 per page retrieved
 	exaPerSearch  float64
 	exaPerContent float64
 
 	// Jina: $0.02 per million tokens = $0.00000002 per token
 	jinaPerToken float64
 
-	// Mixedbread: $0.004 per query (search without rerank)
+	// Mixedbread: $0.0075 per query ($7.50 per 1K queries with rerank)
 	mixedbreadPerQuery float64
 
 	mu sync.RWMutex
@@ -42,9 +43,9 @@ func NewCostCalculator() *CostCalculator {
 		// Source: https://docs.tavily.com/documentation/api-credits
 		tavilyPerCredit: 0.008,
 
-		// Brave: Average of Base ($0.003) and Pro ($0.005) per 1k requests
+		// Brave: $5 per 1,000 requests (Pro AI tier)
 		// Source: https://api-dashboard.search.brave.com/app/plans
-		bravePerRequest: 0.004,
+		bravePerRequest: 0.005,
 
 		// Exa: Fast/neural search 1-25 results tier
 		// Contents retrieval rate
@@ -53,12 +54,14 @@ func NewCostCalculator() *CostCalculator {
 		exaPerContent: 0.001,
 
 		// Jina: $0.02 per million tokens
+		// Note: search has a minimum of 10,000 tokens per request
 		// Source: https://jina.ai/pricing/
 		jinaPerToken: 0.02 / 1000000,
 
-		// Mixedbread: $4 per 1K queries = $0.004 per query
+		// Mixedbread: $7.50 per 1K queries (search with rerank)
+		// The benchmark always uses rerank which costs $7.50/1K
 		// Source: https://www.mixedbread.com/pricing
-		mixedbreadPerQuery: 0.004,
+		mixedbreadPerQuery: 0.0075,
 	}
 }
 
@@ -92,7 +95,7 @@ func (cc *CostCalculator) CalculateFirecrawlCost(creditsUsed int, _ string) floa
 }
 
 // CalculateTavilyCost computes USD cost for Tavily based on credits used.
-// Tavily charges: search=1-2 credits, extract=1 credit per 5 URLs, map=1 credit per 10 pages.
+// Tavily charges: search=1-2 credits, extract=1-2 credits per 5 URLs, map=1 credit.
 func (cc *CostCalculator) CalculateTavilyCost(creditsUsed int, _ string) float64 {
 	cc.mu.RLock()
 	defer cc.mu.RUnlock()
@@ -100,7 +103,7 @@ func (cc *CostCalculator) CalculateTavilyCost(creditsUsed int, _ string) float64
 }
 
 // CalculateBraveCost computes USD cost for Brave based on requests made.
-// Brave charges per request: $3-5 per 1,000 requests depending on tier.
+// Brave charges per request: $5 per 1,000 requests (Pro AI tier).
 func (cc *CostCalculator) CalculateBraveCost(requestsMade int, _ string) float64 {
 	cc.mu.RLock()
 	defer cc.mu.RUnlock()
@@ -120,8 +123,7 @@ func (cc *CostCalculator) CalculateExaCost(creditsUsed int, _ string, isContentF
 }
 
 // CalculateJinaCost computes USD cost for Jina based on tokens used.
-// Jina charges $0.02 per million tokens.
-// Search/Extract/Crawl: token usage varies by endpoint mode and output size.
+// Jina charges $0.02 per million tokens with a minimum of 10,000 tokens per search request.
 func (cc *CostCalculator) CalculateJinaCost(tokensUsed int, _ string) float64 {
 	cc.mu.RLock()
 	defer cc.mu.RUnlock()
@@ -129,7 +131,7 @@ func (cc *CostCalculator) CalculateJinaCost(tokensUsed int, _ string) float64 {
 }
 
 // CalculateMixedbreadCost computes USD cost for Mixedbread based on queries made.
-// Mixedbread charges $4 per 1,000 search queries.
+// Mixedbread charges $7.50 per 1,000 search queries (with rerank).
 func (cc *CostCalculator) CalculateMixedbreadCost(queriesMade int, _ string) float64 {
 	cc.mu.RLock()
 	defer cc.mu.RUnlock()
@@ -184,13 +186,13 @@ func (cc *CostCalculator) GetPricingInfo() map[string]map[string]string {
 			"unit":        "credit",
 			"rate":        "$0.008",
 			"source":      "https://docs.tavily.com/documentation/api-credits",
-			"description": "Search: 1-2 credits, Extract: 1 credit/5 URLs, Map: 1 credit/10 pages",
+			"description": "Search: 1-2 credits, Extract: 1-2 credits/5 URLs, Map: 1 credit",
 		},
 		"brave": {
 			"unit":        "request",
-			"rate":        "$0.004",
+			"rate":        "$0.005",
 			"source":      "https://api-dashboard.search.brave.com/app/plans",
-			"description": "$3-5 per 1,000 requests depending on tier",
+			"description": "$5 per 1,000 requests (Pro AI tier)",
 		},
 		"exa": {
 			"unit":        "request",
@@ -202,13 +204,13 @@ func (cc *CostCalculator) GetPricingInfo() map[string]map[string]string {
 			"unit":        "token",
 			"rate":        "$0.02 per million",
 			"source":      "https://jina.ai/pricing/",
-			"description": "Token-based billing; usage varies by endpoint mode and output size",
+			"description": "Token-based billing; min 10K tokens per search request",
 		},
 		"mixedbread": {
 			"unit":        "query",
-			"rate":        "$0.004",
+			"rate":        "$0.0075",
 			"source":      "https://www.mixedbread.com/pricing",
-			"description": "$4 per 1,000 search queries",
+			"description": "$7.50 per 1,000 search queries (with rerank)",
 		},
 		"local": {
 			"unit":        "N/A",
