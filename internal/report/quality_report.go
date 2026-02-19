@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/metrics"
+	"github.com/lamim/sanity-web-eval/internal/metrics"
 )
 
 // QualityReportGenerator generates quality-focused reports

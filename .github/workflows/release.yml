@@ -45,15 +45,15 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          OUTPUT_NAME="search-api-bench-${{ matrix.suffix }}${{ matrix.extension }}"
+          OUTPUT_NAME="sanity-web-eval-${{ matrix.suffix }}${{ matrix.extension }}"
           go build -ldflags "-s -w -X main.Version=${{ github.ref_name }} -X main.Commit=${{ github.sha }} -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o "${OUTPUT_NAME}" ./cmd/bench
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: search-api-bench-${{ matrix.suffix }}
-          path: search-api-bench-${{ matrix.suffix }}${{ matrix.extension }}
+          name: sanity-web-eval-${{ matrix.suffix }}
+          path: sanity-web-eval-${{ matrix.suffix }}${{ matrix.extension }}
 
   release:
     needs: build
@@ -69,7 +69,7 @@ jobs:
       - name: Create release archives
         run: |
           mkdir -p release
-          for file in artifacts/search-api-bench-*; do
+          for file in artifacts/sanity-web-eval-*; do
             filename=$(basename "$file")
             if [[ "$filename" == *windows* ]]; then
               zip -j "release/${filename}.zip" "$file"

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

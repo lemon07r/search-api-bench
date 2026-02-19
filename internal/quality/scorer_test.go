@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lamim/search-api-bench/internal/providers"
-	"github.com/lamim/search-api-bench/internal/providers/testutil"
+	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers/testutil"
 )
 
 func TestScoreSearch_PartialSignalFallbackUsesReranker(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers"
 )
 
 const (

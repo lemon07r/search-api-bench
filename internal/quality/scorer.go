@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers"
 )
 
 const semanticSearchMaxDocumentChars = 4000

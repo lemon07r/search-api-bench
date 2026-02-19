@@ -1,4 +1,4 @@
-# Search API Benchmark
+# SanityWebEval
 
 A Go CLI for benchmarking web `search`, `extract`, and `crawl` capabilities across multiple providers with consistent tests, latency/cost metrics, and optional scoring diagnostics.
 
@@ -13,14 +13,14 @@ make build
 ### 2. Run without API keys (local crawler only)
 
 ```bash
-./build/search-api-bench -providers local -no-search
+./build/sanity-web-eval -providers local -no-search
 ```
 
 ### 3. Run a cloud provider
 
 ```bash
 # Requires FIRECRAWL_API_KEY in .env or environment
-./build/search-api-bench -providers firecrawl
+./build/sanity-web-eval -providers firecrawl
 ```
 
 ### 4. Find outputs
@@ -171,46 +171,46 @@ Primary comparable rankings use normalized mode and native-capability operation 
 ## CLI Essentials
 
 ```bash
-./build/search-api-bench [flags]
+./build/sanity-web-eval [flags]
 ```
 
 ### Common commands
 
 ```bash
 # All default providers (excludes Local and Jina)
-./build/search-api-bench
+./build/sanity-web-eval
 
 # Specific providers
-./build/search-api-bench -providers firecrawl,tavily
+./build/sanity-web-eval -providers firecrawl,tavily
 
 # Include Local provider (opt-in, no API key needed)
-./build/search-api-bench -local
-./build/search-api-bench -providers local    # Local only
+./build/sanity-web-eval -local
+./build/sanity-web-eval -providers local    # Local only
 
 # Include Jina (opt-in, high cost)
-./build/search-api-bench -jina
-./build/search-api-bench -providers jina    # Jina only
+./build/sanity-web-eval -jina
+./build/sanity-web-eval -providers jina    # Jina only
 
 # Output only markdown + json
-./build/search-api-bench -format md,json
+./build/sanity-web-eval -format md,json
 
 # Select execution mode
-./build/search-api-bench -mode normalized
-./build/search-api-bench -mode native
+./build/sanity-web-eval -mode normalized
+./build/sanity-web-eval -mode native
 
 # Repeat each test/provider run to reduce noise
-./build/search-api-bench -repeats 5
+./build/sanity-web-eval -repeats 5
 
 # Normalized-mode policy for emulated operations
-./build/search-api-bench -capability-policy strict
-./build/search-api-bench -capability-policy tagged
+./build/sanity-web-eval -capability-policy strict
+./build/sanity-web-eval -capability-policy tagged
 
 # Quick mode (up to 3 tests, timeout forced to 30s, crawl max_depth normalized to 1)
-./build/search-api-bench -quick
+./build/sanity-web-eval -quick
 
 # Debug logs
-./build/search-api-bench -debug
-./build/search-api-bench -debug-full
+./build/sanity-web-eval -debug
+./build/sanity-web-eval -debug-full
 ```
 
 ### Flags

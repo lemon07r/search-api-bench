@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/debug"
+	"github.com/lamim/sanity-web-eval/internal/debug"
 )
 
 // SupportLevel describes the implementation quality for an operation.

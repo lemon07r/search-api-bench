@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/metrics"
+	"github.com/lamim/sanity-web-eval/internal/metrics"
 )
 
 // FormatLatency formats a duration as milliseconds for consistent comparison.
@@ -467,7 +467,7 @@ func (g *Generator) GenerateMarkdown() error {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
 	var sb strings.Builder
-	sb.WriteString("# Search API Benchmark Report\n\n")
+	sb.WriteString("# SanityWebEval Report\n\n")
 	sb.WriteString(fmt.Sprintf("**Generated:** %s\n\n", timestamp))
 
 	// Overview table

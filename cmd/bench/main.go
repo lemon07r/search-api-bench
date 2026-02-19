@@ -10,21 +10,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/config"
-	"github.com/lamim/search-api-bench/internal/debug"
-	"github.com/lamim/search-api-bench/internal/evaluator"
-	"github.com/lamim/search-api-bench/internal/metrics"
-	"github.com/lamim/search-api-bench/internal/progress"
-	"github.com/lamim/search-api-bench/internal/providers"
-	"github.com/lamim/search-api-bench/internal/providers/brave"
-	"github.com/lamim/search-api-bench/internal/providers/exa"
-	"github.com/lamim/search-api-bench/internal/providers/firecrawl"
-	"github.com/lamim/search-api-bench/internal/providers/jina"
-	"github.com/lamim/search-api-bench/internal/providers/local"
-	"github.com/lamim/search-api-bench/internal/providers/mixedbread"
-	"github.com/lamim/search-api-bench/internal/providers/tavily"
-	"github.com/lamim/search-api-bench/internal/quality"
-	"github.com/lamim/search-api-bench/internal/report"
+	"github.com/lamim/sanity-web-eval/internal/config"
+	"github.com/lamim/sanity-web-eval/internal/debug"
+	"github.com/lamim/sanity-web-eval/internal/evaluator"
+	"github.com/lamim/sanity-web-eval/internal/metrics"
+	"github.com/lamim/sanity-web-eval/internal/progress"
+	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers/brave"
+	"github.com/lamim/sanity-web-eval/internal/providers/exa"
+	"github.com/lamim/sanity-web-eval/internal/providers/firecrawl"
+	"github.com/lamim/sanity-web-eval/internal/providers/jina"
+	"github.com/lamim/sanity-web-eval/internal/providers/local"
+	"github.com/lamim/sanity-web-eval/internal/providers/mixedbread"
+	"github.com/lamim/sanity-web-eval/internal/providers/tavily"
+	"github.com/lamim/sanity-web-eval/internal/quality"
+	"github.com/lamim/sanity-web-eval/internal/report"
 )
 
 type cliFlags struct {
@@ -239,7 +239,7 @@ func main() {
 func printBanner() {
 	fmt.Println(`
 ╔══════════════════════════════════════════════════════════════╗
-║               Search API Benchmark Tool                      ║
+║               SanityWebEval Tool                      ║
 ║    Compare Firecrawl, Tavily, Brave, Exa, Mixedbread         ║
 ║    (Jina available with -jina flag)                           ║
 ╚══════════════════════════════════════════════════════════════╝`)

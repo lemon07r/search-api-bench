@@ -20,7 +20,7 @@ import (
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
-	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers"
 )
 
 const (
