@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/providers"
-	"github.com/lamim/search-api-bench/internal/providers/testutil"
+	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/providers/testutil"
 )
 
 func TestNewClient_MissingAPIKey(t *testing.T) {

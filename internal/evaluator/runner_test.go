@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/config"
-	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/config"
+	"github.com/lamim/sanity-web-eval/internal/providers"
 )
 
 // mockProvider implements providers.Provider for testing

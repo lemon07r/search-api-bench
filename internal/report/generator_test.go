@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/metrics"
+	"github.com/lamim/sanity-web-eval/internal/metrics"
 )
 
 func setupMockCollector() *metrics.Collector {
@@ -89,7 +89,7 @@ func TestGenerateMarkdown_SingleProvider(t *testing.T) {
 	if !strings.Contains(string(content), "single") {
 		t.Error("report should contain provider name")
 	}
-	if !strings.Contains(string(content), "Search API Benchmark Report") {
+	if !strings.Contains(string(content), "SanityWebEval Report") {
 		t.Error("report should contain title")
 	}
 }
@@ -724,7 +724,7 @@ func TestGenerateHTML_Structure(t *testing.T) {
 	if !strings.Contains(html, "chart.js") && !strings.Contains(html, "Chart.js") {
 		t.Error("HTML should reference Chart.js")
 	}
-	if !strings.Contains(html, "Search API Benchmark Report") {
+	if !strings.Contains(html, "SanityWebEval Report") {
 		t.Error("HTML should contain title")
 	}
 }
@@ -888,7 +888,7 @@ func TestGenerateMarkdown_EmptyResults(t *testing.T) {
 		t.Fatalf("failed to read report: %v", err)
 	}
 
-	if !strings.Contains(string(content), "Search API Benchmark Report") {
+	if !strings.Contains(string(content), "SanityWebEval Report") {
 		t.Error("report should still contain title even with empty results")
 	}
 }

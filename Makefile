@@ -1,7 +1,7 @@
 .PHONY: all build test clean install run lint fmt release
 
 # Variables
-BINARY_NAME := search-api-bench
+BINARY_NAME := sanity-web-eval
 MAIN_PATH := ./cmd/bench
 BUILD_DIR := ./build
 OUTPUT_DIR := ./results

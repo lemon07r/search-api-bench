@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/metrics"
-	"github.com/lamim/search-api-bench/internal/providers"
+	"github.com/lamim/sanity-web-eval/internal/metrics"
+	"github.com/lamim/sanity-web-eval/internal/providers"
 )
 
 // Comparison provides cross-provider comparison capabilities

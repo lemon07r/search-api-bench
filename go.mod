@@ -1,4 +1,4 @@
-module github.com/lamim/search-api-bench
+module github.com/lamim/sanity-web-eval
 
 go 1.25.3
 

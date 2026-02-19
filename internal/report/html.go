@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/search-api-bench/internal/metrics"
+	"github.com/lamim/sanity-web-eval/internal/metrics"
 )
 
 // GenerateHTML creates an HTML report with charts
@@ -26,7 +26,7 @@ func (g *Generator) GenerateHTML() error {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search API Benchmark Report</title>
+    <title>SanityWebEval Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -82,7 +82,7 @@ func (g *Generator) GenerateHTML() error {
 </head>
 <body>
     <div class="container">
-        <h1>Search API Benchmark Report</h1>
+        <h1>SanityWebEval Report</h1>
         <p class="timestamp">Generated: `)
 	html.WriteString(timestamp)
 	html.WriteString(`</p>

@@ -160,7 +160,7 @@ func (m *Manager) render() {
 
 	// Print header
 	fmt.Println("╔══════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                    Search API Benchmark Tool                             ║")
+	fmt.Println("║                    SanityWebEval Tool                             ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
