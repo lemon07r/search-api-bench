@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/config"
-	"github.com/lamim/sanity-web-eval/internal/debug"
-	"github.com/lamim/sanity-web-eval/internal/metrics"
-	"github.com/lamim/sanity-web-eval/internal/progress"
-	"github.com/lamim/sanity-web-eval/internal/providers"
-	"github.com/lamim/sanity-web-eval/internal/quality"
+	"github.com/lamim/SanityWebEval/internal/config"
+	"github.com/lamim/SanityWebEval/internal/debug"
+	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/progress"
+	"github.com/lamim/SanityWebEval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/quality"
 )
 
 // costCalculator is used for USD cost calculations

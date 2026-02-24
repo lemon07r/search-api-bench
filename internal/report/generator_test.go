@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/metrics"
 )
 
 func setupMockCollector() *metrics.Collector {

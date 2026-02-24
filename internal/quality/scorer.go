@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/providers"
 )
 
 const semanticSearchMaxDocumentChars = 4000
@@ -110,10 +110,7 @@ func (s *Scorer) ScoreSearch(ctx context.Context, query string, results []provid
 	diversity := s.calculateDiversity(results)
 	score.ResultDiversity = diversity.DomainDiversity
 
-	// 5. Authority score
-	score.AuthorityScore = s.calculateAuthorityScore(results)
-
-	// 6. Freshness score
+	// 5. Freshness score
 	score.FreshnessScore = s.calculateFreshnessScore(results)
 
 	weights := s.weights
@@ -330,45 +327,6 @@ func (s *Scorer) calculateDiversity(results []providers.SearchItem) DiversityMet
 	}
 
 	return metrics
-}
-
-// calculateAuthorityScore estimates source authority
-func (s *Scorer) calculateAuthorityScore(results []providers.SearchItem) float64 {
-	if len(results) == 0 {
-		return 0
-	}
-
-	authorityDomains := map[string]int{
-		"wikipedia.org":         100,
-		"github.com":            95,
-		"stackoverflow.com":     95,
-		"docs.python.org":       95,
-		"developer.mozilla.org": 95,
-		"arxiv.org":             90,
-		"ieee.org":              90,
-		"acm.org":               90,
-		"nature.com":            90,
-		"science.org":           90,
-		"reuters.com":           85,
-		"bloomberg.com":         85,
-		"techcrunch.com":        75,
-		"medium.com":            70,
-		"reddit.com":            60,
-		"youtube.com":           60,
-	}
-
-	var totalScore float64
-	for _, r := range results {
-		domain := extractDomain(r.URL)
-		if score, ok := authorityDomains[domain]; ok {
-			totalScore += float64(score)
-		} else {
-			// Default score for unknown domains
-			totalScore += 50
-		}
-	}
-
-	return totalScore / float64(len(results))
 }
 
 // calculateFreshnessScore estimates content freshness

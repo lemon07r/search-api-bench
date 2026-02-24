@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/metrics"
-	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/providers"
 )
 
 // Comparison provides cross-provider comparison capabilities

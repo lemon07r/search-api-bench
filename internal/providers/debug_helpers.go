@@ -6,7 +6,7 @@ import (
 	"net/http/httptrace"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/debug"
+	"github.com/lamim/SanityWebEval/internal/debug"
 )
 
 // LogRequest logs an HTTP request via the debug logger if available in context.

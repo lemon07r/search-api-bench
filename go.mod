@@ -1,4 +1,4 @@
-module github.com/lamim/sanity-web-eval
+module github.com/lamim/SanityWebEval
 
 go 1.25.3
 

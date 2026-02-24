@@ -18,7 +18,7 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/gocolly/colly/v2"
-	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/providers"
 )
 
 // Client represents a local crawler/scraper using Colly

@@ -1,7 +1,7 @@
 .PHONY: all build test clean install run lint fmt release
 
 # Variables
-BINARY_NAME := sanity-web-eval
+BINARY_NAME := SanityWebEval
 MAIN_PATH := ./cmd/bench
 BUILD_DIR := ./build
 OUTPUT_DIR := ./results
