@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 )
 
 // GenerateHTML creates an HTML report with charts
@@ -237,7 +237,7 @@ func (g *Generator) generateQualityByTestTypeSection() string {
 	var rows strings.Builder
 	for _, provider := range g.collector.GetAllProviders() {
 		byType := g.computeProviderQualityByTestType(provider)
-		rows.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&rows, `
                     <tr>
                         <td><span class="provider-badge provider-%s">%s</span></td>
                         <td>%s</td>
@@ -267,7 +267,7 @@ func (g *Generator) generateQualityByTestTypeSection() string {
 			formatQualityCoverage(byType.Extract),
 			formatQualityValue(byType.Crawl),
 			formatQualityCoverage(byType.Crawl),
-		))
+		)
 	}
 
 	return `
@@ -1532,7 +1532,7 @@ func (g *Generator) prepareRadarData(providers []string) []radarData {
 	var maxContent float64
 	var maxSearchRelevance float64
 
-	summaries := make([]*metrics.Summary, len(providers))
+	summaries := make([]*benchmetrics.Summary, len(providers))
 	searchRelevanceScores := make([]float64, len(providers))
 	for i, p := range providers {
 		s := g.collector.ComputeSummary(p)
@@ -1705,7 +1705,7 @@ func (g *Generator) prepareHeatmapData(_ []string) []heatmapCell {
 	return cells
 }
 
-func calculateCompositeScore(r metrics.Result, maxLatency time.Duration, maxCost float64) float64 {
+func calculateCompositeScore(r benchmetrics.Result, maxLatency time.Duration, maxCost float64) float64 {
 	if !r.Success {
 		return 0
 	}
@@ -1855,17 +1855,17 @@ func (g *Generator) generateHeatmapScript(providers []string, cells []heatmapCel
 	// Build heatmap grid HTML
 	var html strings.Builder
 
-	html.WriteString(fmt.Sprintf(`<div class="heatmap-grid" style="grid-template-columns: 150px repeat(%d, 1fr);">`, len(tests)))
+	fmt.Fprintf(&html, `<div class="heatmap-grid" style="grid-template-columns: 150px repeat(%d, 1fr);">`, len(tests))
 
 	// Header row
 	html.WriteString(`<div class="heatmap-header"></div>`)
 	for _, test := range tests {
-		html.WriteString(fmt.Sprintf(`<div class="heatmap-header">%s</div>`, test))
+		fmt.Fprintf(&html, `<div class="heatmap-header">%s</div>`, test)
 	}
 
 	// Data rows
 	for _, provider := range providers {
-		html.WriteString(fmt.Sprintf(`<div class="heatmap-provider"><span class="provider-badge provider-%s">%s</span></div>`, provider, capitalize(provider)))
+		fmt.Fprintf(&html, `<div class="heatmap-provider"><span class="provider-badge provider-%s">%s</span></div>`, provider, capitalize(provider))
 
 		for _, test := range tests {
 			// Find cell for this provider-test combination
@@ -1881,7 +1881,7 @@ func (g *Generator) generateHeatmapScript(providers []string, cells []heatmapCel
 				html.WriteString(`<div class="heatmap-cell heatmap-na">N/A</div>`)
 			} else {
 				scoreText := fmt.Sprintf("%.0f", cell.Score)
-				html.WriteString(fmt.Sprintf(`<div class="heatmap-cell heatmap-%s" title="Score: %s">%s</div>`, cell.Category, scoreText, scoreText))
+				fmt.Fprintf(&html, `<div class="heatmap-cell heatmap-%s" title="Score: %s">%s</div>`, cell.Category, scoreText, scoreText)
 			}
 		}
 	}

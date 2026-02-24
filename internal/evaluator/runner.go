@@ -12,23 +12,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 	"github.com/lamim/SanityWebEval/internal/config"
 	"github.com/lamim/SanityWebEval/internal/debug"
-	"github.com/lamim/SanityWebEval/internal/metrics"
 	"github.com/lamim/SanityWebEval/internal/progress"
 	"github.com/lamim/SanityWebEval/internal/providers"
 	"github.com/lamim/SanityWebEval/internal/quality"
 )
 
 // costCalculator is used for USD cost calculations
-var costCalculator = metrics.NewCostCalculator()
+var costCalculator = benchmetrics.NewCostCalculator()
 
 // Runner executes benchmark tests
 type Runner struct {
 	providers   []providers.Provider
 	config      *config.Config
 	providerSem map[string]chan struct{}
-	collector   *metrics.Collector
+	collector   *benchmetrics.Collector
 	progress    *progress.Manager
 	debugLogger *debug.Logger
 	scorer      *quality.Scorer
@@ -91,7 +91,7 @@ func NewRunner(cfg *config.Config, provs []providers.Provider, prog *progress.Ma
 		providers:   provs,
 		config:      cfg,
 		providerSem: providerSem,
-		collector:   metrics.NewCollector(),
+		collector:   benchmetrics.NewCollector(),
 		progress:    prog,
 		debugLogger: debugLog,
 		scorer:      scorer,
@@ -165,7 +165,7 @@ func (r *Runner) runTest(ctx context.Context, repeat int, test config.TestConfig
 	capabilities := prov.Capabilities()
 	supportLevel := capabilities.ForOperation(test.Type)
 
-	result := metrics.Result{
+	result := benchmetrics.Result{
 		TestName:            test.Name,
 		Provider:            prov.Name(),
 		TestType:            test.Type,
@@ -253,7 +253,7 @@ func (r *Runner) runTest(ctx context.Context, repeat int, test config.TestConfig
 	r.collector.AddResult(result)
 }
 
-func (r *Runner) completeSkippedResult(prov providers.Provider, test config.TestConfig, result metrics.Result) {
+func (r *Runner) completeSkippedResult(prov providers.Provider, test config.TestConfig, result benchmetrics.Result) {
 	// Report to progress manager (skipped counts as success for progress)
 	if r.progress != nil {
 		r.progress.StartTest(prov.Name(), test.Name)
@@ -267,7 +267,7 @@ func (r *Runner) completeSkippedResult(prov providers.Provider, test config.Test
 	r.collector.AddResult(result)
 }
 
-func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
+func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *benchmetrics.Result, testLog *debug.TestLog) {
 	opts := r.searchOptionsForMode()
 
 	startTime := time.Now()
@@ -377,7 +377,7 @@ func (r *Runner) runSearchTest(ctx context.Context, test config.TestConfig, prov
 	}
 }
 
-func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
+func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *benchmetrics.Result, testLog *debug.TestLog) {
 	opts := providers.DefaultExtractOptions()
 
 	startTime := time.Now()
@@ -465,7 +465,7 @@ func (r *Runner) runExtractTest(ctx context.Context, test config.TestConfig, pro
 	}
 }
 
-func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *metrics.Result, testLog *debug.TestLog) {
+func (r *Runner) runCrawlTest(ctx context.Context, test config.TestConfig, prov providers.Provider, result *benchmetrics.Result, testLog *debug.TestLog) {
 	opts := providers.DefaultCrawlOptions()
 	if test.MaxPages != nil {
 		opts.MaxPages = *test.MaxPages
@@ -948,7 +948,7 @@ func categorizeError(err error) string {
 }
 
 // GetCollector returns the metrics collector
-func (r *Runner) GetCollector() *metrics.Collector {
+func (r *Runner) GetCollector() *benchmetrics.Collector {
 	return r.collector
 }
 

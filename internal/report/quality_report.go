@@ -9,17 +9,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 )
 
 // QualityReportGenerator generates quality-focused reports
 type QualityReportGenerator struct {
-	collector *metrics.Collector
+	collector *benchmetrics.Collector
 	outputDir string
 }
 
 // NewQualityReportGenerator creates a new quality report generator
-func NewQualityReportGenerator(collector *metrics.Collector, outputDir string) *QualityReportGenerator {
+func NewQualityReportGenerator(collector *benchmetrics.Collector, outputDir string) *QualityReportGenerator {
 	return &QualityReportGenerator{
 		collector: collector,
 		outputDir: outputDir,
@@ -33,7 +33,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 
 	var sb strings.Builder
 	sb.WriteString("# Search API Quality Benchmark Report\n\n")
-	sb.WriteString(fmt.Sprintf("**Generated:** %s\n\n", timestamp))
+	fmt.Fprintf(&sb, "**Generated:** %s\n\n", timestamp)
 	sb.WriteString("This report focuses on quality metrics powered by AI-based evaluation.\n\n")
 
 	// Quality score overview
@@ -43,13 +43,13 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
-		sb.WriteString(fmt.Sprintf("| %s | %.1f | %.1f | %.1f | %.1f%% |\n",
+		fmt.Fprintf(&sb, "| %s | %.1f | %.1f | %.1f | %.1f%% |\n",
 			provider,
 			summary.AvgQualityScore,
 			summary.MinQualityScore,
 			summary.MaxQualityScore,
 			summary.SuccessRate,
-		))
+		)
 	}
 
 	sb.WriteString("\n")
@@ -58,7 +58,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 	sb.WriteString("## Quality Score Distribution\n\n")
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
-		sb.WriteString(fmt.Sprintf("### %s\n\n", provider))
+		fmt.Fprintf(&sb, "### %s\n\n", provider)
 
 		if len(summary.QualityScoreDist) == 0 {
 			sb.WriteString("_No quality scores recorded_\n\n")
@@ -79,7 +79,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 
 		for _, bucket := range buckets {
 			if count, ok := summary.QualityScoreDist[bucket]; ok {
-				sb.WriteString(fmt.Sprintf("| %s | %d |\n", bucket, count))
+				fmt.Fprintf(&sb, "| %s | %d |\n", bucket, count)
 			}
 		}
 		sb.WriteString("\n")
@@ -94,12 +94,12 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("### %s\n\n", provider))
+		fmt.Fprintf(&sb, "### %s\n\n", provider)
 		sb.WriteString("| Error Category | Count |\n")
 		sb.WriteString("|----------------|-------|\n")
 
 		for category, count := range summary.ErrorBreakdown {
-			sb.WriteString(fmt.Sprintf("| %s | %d |\n", category, count))
+			fmt.Fprintf(&sb, "| %s | %d |\n", category, count)
 		}
 		sb.WriteString("\n")
 	}
@@ -109,7 +109,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 
 	tests := g.collector.GetAllTests()
 	for _, testName := range tests {
-		sb.WriteString(fmt.Sprintf("### %s\n\n", testName))
+		fmt.Fprintf(&sb, "### %s\n\n", testName)
 		sb.WriteString("| Provider | Quality Score | Semantic | Reranker | Status |\n")
 		sb.WriteString("|----------|---------------|----------|----------|--------|\n")
 
@@ -122,13 +122,13 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 				status = "✗ Fail"
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | %.1f | %.1f | %.1f | %s |\n",
+			fmt.Fprintf(&sb, "| %s | %.1f | %.1f | %.1f | %s |\n",
 				r.Provider,
 				r.QualityScore,
 				r.SemanticScore,
 				r.RerankerScore,
 				status,
-			))
+			)
 		}
 		sb.WriteString("\n")
 	}
@@ -148,7 +148,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 				better = providers[1]
 				qualityDiff = -qualityDiff
 			}
-			sb.WriteString(fmt.Sprintf("- **%s** has %.1f%% higher average quality score\n", better, qualityDiff))
+			fmt.Fprintf(&sb, "- **%s** has %.1f%% higher average quality score\n", better, qualityDiff)
 		}
 
 		// Success rate comparison
@@ -159,7 +159,7 @@ func (g *QualityReportGenerator) GenerateQualityMarkdown() error {
 				better = providers[1]
 				diff = -diff
 			}
-			sb.WriteString(fmt.Sprintf("- **%s** has %.1f%% better success rate\n", better, diff))
+			fmt.Fprintf(&sb, "- **%s** has %.1f%% better success rate\n", better, diff)
 		}
 
 		sb.WriteString("\n")
@@ -181,7 +181,7 @@ func (g *QualityReportGenerator) GenerateQualityJSON() error {
 	}
 
 	// Add quality summaries
-	summaries := make(map[string]*metrics.Summary)
+	summaries := make(map[string]*benchmetrics.Summary)
 	for _, provider := range providers {
 		summaries[provider] = g.collector.ComputeSummary(provider)
 	}
@@ -340,12 +340,12 @@ func (g *QualityReportGenerator) generateQualityCards() string {
 			qualityClass = "acceptable"
 		}
 
-		cards.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&cards, `
                 <div class="card">
                     <h3>%s Average Quality</h3>
                     <div class="value %s">%.1f</div>
                     <div class="subtitle">Min: %.1f | Max: %.1f</div>
-                </div>`, provider, qualityClass, summary.AvgQualityScore, summary.MinQualityScore, summary.MaxQualityScore))
+                </div>`, provider, qualityClass, summary.AvgQualityScore, summary.MinQualityScore, summary.MaxQualityScore)
 	}
 
 	return cards.String()
@@ -377,7 +377,7 @@ func (g *QualityReportGenerator) generateQualityTableRows() string {
 
 			providerClass := "provider-" + r.Provider
 
-			rows.WriteString(fmt.Sprintf(`
+			fmt.Fprintf(&rows, `
                     <tr>
                         <td>%s</td>
                         <td><span class="provider-badge %s">%s</span></td>
@@ -393,7 +393,7 @@ func (g *QualityReportGenerator) generateQualityTableRows() string {
 				r.QualityScore,
 				r.SemanticScore,
 				r.RerankerScore,
-				status))
+				status)
 		}
 	}
 

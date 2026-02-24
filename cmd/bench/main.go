@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 	"github.com/lamim/SanityWebEval/internal/config"
 	"github.com/lamim/SanityWebEval/internal/debug"
 	"github.com/lamim/SanityWebEval/internal/evaluator"
-	"github.com/lamim/SanityWebEval/internal/metrics"
 	"github.com/lamim/SanityWebEval/internal/progress"
 	"github.com/lamim/SanityWebEval/internal/providers"
 	"github.com/lamim/SanityWebEval/internal/providers/brave"
@@ -246,7 +246,7 @@ func printBanner() {
 	fmt.Println()
 }
 
-func printSummary(collector *metrics.Collector) {
+func printSummary(collector *benchmetrics.Collector) {
 	fmt.Println("\n═══════════════════════════════════════════════════════════════")
 	fmt.Println("                     BENCHMARK SUMMARY")
 	fmt.Println("═══════════════════════════════════════════════════════════════")
@@ -352,7 +352,7 @@ func initializeProviders(providerNames []string, debugLogger *debug.Logger) []pr
 	return provs
 }
 
-func generateReports(formats []string, collector *metrics.Collector, outputDir string) {
+func generateReports(formats []string, collector *benchmetrics.Collector, outputDir string) {
 	fmt.Println("\nGenerating reports...")
 	gen := report.NewGenerator(collector, outputDir)
 

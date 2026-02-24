@@ -123,9 +123,9 @@ type SearchQualityScore struct {
 	RerankerScore     float64 `json:"reranker_score"`     // 0-100, reranker confidence
 	SemanticAvailable bool    `json:"semantic_available,omitempty"`
 	RerankerAvailable bool    `json:"reranker_available,omitempty"`
-	TopKAccuracy    float64 `json:"top_k_accuracy"`   // 0-100, relevance of top N
-	ResultDiversity float64 `json:"result_diversity"` // 0-100, domain/content variety
-	FreshnessScore  float64 `json:"freshness_score"`  // 0-100, content recency
+	TopKAccuracy      float64 `json:"top_k_accuracy"`   // 0-100, relevance of top N
+	ResultDiversity   float64 `json:"result_diversity"` // 0-100, domain/content variety
+	FreshnessScore    float64 `json:"freshness_score"`  // 0-100, content recency
 	OverallScore      float64 `json:"overall_score"`    // 0-100, weighted composite
 }
 

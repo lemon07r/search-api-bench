@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 )
 
 // FormatLatency formats a duration as milliseconds for consistent comparison.
@@ -20,12 +20,12 @@ func FormatLatency(d time.Duration) string {
 
 // Generator creates reports from benchmark results
 type Generator struct {
-	collector *metrics.Collector
+	collector *benchmetrics.Collector
 	outputDir string
 }
 
 // NewGenerator creates a new report generator
-func NewGenerator(collector *metrics.Collector, outputDir string) *Generator {
+func NewGenerator(collector *benchmetrics.Collector, outputDir string) *Generator {
 	return &Generator{
 		collector: collector,
 		outputDir: outputDir,
@@ -49,7 +49,7 @@ func (g *Generator) GenerateAll() error {
 // providerSummary wraps a provider name with its summary metrics
 type providerSummary struct {
 	name    string
-	summary *metrics.Summary
+	summary *benchmetrics.Summary
 }
 
 type testTypeQualityStats struct {
@@ -468,7 +468,7 @@ func (g *Generator) GenerateMarkdown() error {
 
 	var sb strings.Builder
 	sb.WriteString("# SanityWebEval Report\n\n")
-	sb.WriteString(fmt.Sprintf("**Generated:** %s\n\n", timestamp))
+	fmt.Fprintf(&sb, "**Generated:** %s\n\n", timestamp)
 
 	// Overview table
 	sb.WriteString("## Summary\n\n")
@@ -477,7 +477,7 @@ func (g *Generator) GenerateMarkdown() error {
 
 	for _, provider := range providers {
 		summary := g.collector.ComputeSummary(provider)
-		sb.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars | %.1f%% |\n",
+		fmt.Fprintf(&sb, "| %s | %d | %d | %d | %.1f%% | %s | %s | %.0f chars | %.1f%% |\n",
 			provider,
 			summary.TotalTests,
 			summary.ExecutedTests,
@@ -487,7 +487,7 @@ func (g *Generator) GenerateMarkdown() error {
 			formatCostUSD(summary.TotalCostUSD),
 			summary.AvgContentLength,
 			summary.QualityCoveragePct,
-		))
+		)
 	}
 
 	sb.WriteString("\n")
@@ -512,7 +512,7 @@ func (g *Generator) GenerateMarkdown() error {
 
 	tests := g.collector.GetAllTests()
 	for _, testName := range tests {
-		sb.WriteString(fmt.Sprintf("### %s\n\n", testName))
+		fmt.Fprintf(&sb, "### %s\n\n", testName)
 
 		// Use appropriate headers based on whether quality scores exist
 		if hasQualityScores {
@@ -555,7 +555,7 @@ func (g *Generator) GenerateMarkdown() error {
 				if r.RerankerScore > 0 {
 					rerankerStr = fmt.Sprintf("%.1f", r.RerankerScore)
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+				fmt.Fprintf(&sb, "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 					r.Provider,
 					status,
 					FormatLatency(r.Latency),
@@ -565,15 +565,15 @@ func (g *Generator) GenerateMarkdown() error {
 					qualityStr,
 					semanticStr,
 					rerankerStr,
-				))
+				)
 			} else {
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+				fmt.Fprintf(&sb, "| %s | %s | %s | %s | %s |\n",
 					r.Provider,
 					status,
 					FormatLatency(r.Latency),
 					formatCostUSD(r.CostUSD),
 					details,
-				))
+				)
 			}
 		}
 		sb.WriteString("\n")
@@ -609,7 +609,7 @@ func (g *Generator) GenerateJSON() error {
 	}
 
 	// Add summaries
-	summaries := make(map[string]*metrics.Summary)
+	summaries := make(map[string]*benchmetrics.Summary)
 	qualityByTestType := make(map[string]providerQualityByTestType)
 	for _, provider := range g.collector.GetAllProviders() {
 		summaries[provider] = g.collector.ComputeSummary(provider)

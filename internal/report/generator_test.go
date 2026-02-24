@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 )
 
-func setupMockCollector() *metrics.Collector {
-	c := metrics.NewCollector()
+func setupMockCollector() *benchmetrics.Collector {
+	c := benchmetrics.NewCollector()
 
 	// Add test results for provider1
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search Test",
 		Provider:      "provider1",
 		TestType:      "search",
@@ -26,7 +26,7 @@ func setupMockCollector() *metrics.Collector {
 		ResultsCount:  5,
 		Timestamp:     time.Now(),
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Extract Test",
 		Provider:      "provider1",
 		TestType:      "extract",
@@ -36,7 +36,7 @@ func setupMockCollector() *metrics.Collector {
 		ContentLength: 1000,
 		Timestamp:     time.Now(),
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search Test",
 		Provider:      "provider2",
 		TestType:      "search",
@@ -47,7 +47,7 @@ func setupMockCollector() *metrics.Collector {
 		ResultsCount:  6,
 		Timestamp:     time.Now(),
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:  "Failed Test",
 		Provider:  "provider1",
 		TestType:  "search",
@@ -61,8 +61,8 @@ func setupMockCollector() *metrics.Collector {
 }
 
 func TestGenerateMarkdown_SingleProvider(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Test 1",
 		Provider:      "single",
 		TestType:      "search",
@@ -122,9 +122,9 @@ func TestGenerateMarkdown_MultipleProviders(t *testing.T) {
 }
 
 func TestGenerateMarkdown_ComparisonMath(t *testing.T) {
-	c := metrics.NewCollector()
+	c := benchmetrics.NewCollector()
 	// Provider1: faster, more credits
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:    "Test",
 		Provider:    "fast",
 		Success:     true,
@@ -132,7 +132,7 @@ func TestGenerateMarkdown_ComparisonMath(t *testing.T) {
 		CreditsUsed: 2,
 	})
 	// Provider2: slower, fewer credits
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:    "Test",
 		Provider:    "slow",
 		Success:     true,
@@ -161,8 +161,8 @@ func TestGenerateMarkdown_ComparisonMath(t *testing.T) {
 }
 
 func TestGenerateMarkdown_PairwiseDiffsArePositive(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Test",
 		Provider:      "a",
 		TestType:      "search",
@@ -172,7 +172,7 @@ func TestGenerateMarkdown_PairwiseDiffsArePositive(t *testing.T) {
 		ContentLength: 100,
 		QualityScore:  50,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Test",
 		Provider:      "b",
 		TestType:      "search",
@@ -273,8 +273,8 @@ func TestGenerateJSON_Summaries(t *testing.T) {
 }
 
 func TestGenerateJSON_SummariesIncludeQualityCoverageFields(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search",
 		Provider:      "provider1",
 		TestType:      "search",
@@ -285,7 +285,7 @@ func TestGenerateJSON_SummariesIncludeQualityCoverageFields(t *testing.T) {
 		ResultsCount:  1,
 		QualityScore:  80,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search",
 		Provider:      "provider1",
 		TestType:      "search",
@@ -341,8 +341,8 @@ func TestGenerateJSON_ValidJSON(t *testing.T) {
 }
 
 func TestGenerateMarkdown_IncludesScoreFamilyRankings(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search",
 		Provider:      "provider1",
 		TestType:      "search",
@@ -353,7 +353,7 @@ func TestGenerateMarkdown_IncludesScoreFamilyRankings(t *testing.T) {
 		ResultsCount:  3,
 		QualityScore:  90,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search",
 		Provider:      "provider2",
 		TestType:      "search",
@@ -364,7 +364,7 @@ func TestGenerateMarkdown_IncludesScoreFamilyRankings(t *testing.T) {
 		ResultsCount:  3,
 		QualityScore:  95,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Extract",
 		Provider:      "provider1",
 		TestType:      "extract",
@@ -374,7 +374,7 @@ func TestGenerateMarkdown_IncludesScoreFamilyRankings(t *testing.T) {
 		ContentLength: 200,
 		QualityScore:  88,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Crawl",
 		Provider:      "provider1",
 		TestType:      "crawl",
@@ -406,22 +406,22 @@ func TestGenerateMarkdown_IncludesScoreFamilyRankings(t *testing.T) {
 }
 
 func TestGenerateMarkdown_IncludesQualityByTestTypeSection(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:     "Search",
 		Provider:     "provider1",
 		TestType:     "search",
 		Success:      true,
 		QualityScore: 70,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:     "Extract",
 		Provider:     "provider1",
 		TestType:     "extract",
 		Success:      true,
 		QualityScore: 90,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:     "Crawl",
 		Provider:     "provider1",
 		TestType:     "crawl",
@@ -474,8 +474,8 @@ func TestGenerateJSON_WritesFile(t *testing.T) {
 }
 
 func TestGenerateJSON_IncludesScoringByTestType(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:     "Search",
 		Provider:     "provider1",
 		TestType:     "search",
@@ -507,8 +507,8 @@ func TestGenerateJSON_IncludesScoringByTestType(t *testing.T) {
 }
 
 func TestGenerateHTML_IncludesQualityByTestTypeSection(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:     "Search",
 		Provider:     "provider1",
 		TestType:     "search",
@@ -538,8 +538,8 @@ func TestGenerateHTML_IncludesQualityByTestTypeSection(t *testing.T) {
 }
 
 func TestGenerateJSON_ScoringByTestTypeIncludesSearchComponents(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Search",
 		Provider:      "provider1",
 		TestType:      "search",
@@ -605,8 +605,8 @@ func TestGenerateHTML_AdvancedChartsUseBoundedAxesAndNoNestedLatencyRanges(t *te
 }
 
 func TestGenerateHTML_AdvancedChartsShowEmptyStateForNoErrors(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:  "Search",
 		Provider:  "provider1",
 		TestType:  "search",
@@ -615,7 +615,7 @@ func TestGenerateHTML_AdvancedChartsShowEmptyStateForNoErrors(t *testing.T) {
 		CostUSD:   0.01,
 		Timestamp: time.Now(),
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:  "Search",
 		Provider:  "provider2",
 		TestType:  "search",
@@ -639,8 +639,8 @@ func TestGenerateHTML_AdvancedChartsShowEmptyStateForNoErrors(t *testing.T) {
 }
 
 func TestGenerateHTML_TradeoffUsesLogScaleForSkewedAxes(t *testing.T) {
-	c := metrics.NewCollector()
-	results := []metrics.Result{
+	c := benchmetrics.NewCollector()
+	results := []benchmetrics.Result{
 		{TestName: "Search", Provider: "p1", TestType: "search", Success: true, Latency: 150 * time.Millisecond, CostUSD: 0.0012, ResultsCount: 5, QualityScore: 89},
 		{TestName: "Search", Provider: "p2", TestType: "search", Success: true, Latency: 300 * time.Millisecond, CostUSD: 0.0015, ResultsCount: 5, QualityScore: 90},
 		{TestName: "Search", Provider: "p3", TestType: "search", Success: true, Latency: 30 * time.Second, CostUSD: 0.0090, ResultsCount: 5, QualityScore: 86},
@@ -666,8 +666,8 @@ func TestGenerateHTML_TradeoffUsesLogScaleForSkewedAxes(t *testing.T) {
 }
 
 func TestGenerateHTML_RadarLabelsStayAlignedWithoutQuality(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Extract",
 		Provider:      "provider1",
 		TestType:      "extract",
@@ -675,7 +675,7 @@ func TestGenerateHTML_RadarLabelsStayAlignedWithoutQuality(t *testing.T) {
 		Latency:       80 * time.Millisecond,
 		ContentLength: 100,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:      "Extract",
 		Provider:      "provider2",
 		TestType:      "extract",
@@ -730,8 +730,8 @@ func TestGenerateHTML_Structure(t *testing.T) {
 }
 
 func TestGenerateHTML_TableRows(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName:     "Test 1",
 		Provider:     "provider1",
 		TestType:     "search",
@@ -740,7 +740,7 @@ func TestGenerateHTML_TableRows(t *testing.T) {
 		CreditsUsed:  1,
 		ResultsCount: 5,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName:    "Test 1",
 		Provider:    "provider2",
 		TestType:    "search",
@@ -804,13 +804,13 @@ func TestGenerateHTML_ChartScripts(t *testing.T) {
 }
 
 func TestGenerateHTML_ProviderBadges(t *testing.T) {
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName: "Test",
 		Provider: "firecrawl",
 		Success:  true,
 	})
-	c.AddResult(metrics.Result{
+	c.AddResult(benchmetrics.Result{
 		TestName: "Test",
 		Provider: "tavily",
 		Success:  true,
@@ -873,7 +873,7 @@ func TestGenerateAll_CreatesAll(t *testing.T) {
 }
 
 func TestGenerateMarkdown_EmptyResults(t *testing.T) {
-	c := metrics.NewCollector()
+	c := benchmetrics.NewCollector()
 	tmpDir := t.TempDir()
 	gen := NewGenerator(c, tmpDir)
 

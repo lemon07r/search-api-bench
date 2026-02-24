@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 	"github.com/lamim/SanityWebEval/internal/config"
-	"github.com/lamim/SanityWebEval/internal/metrics"
 )
 
 func TestParseProviders_All(t *testing.T) {
@@ -465,8 +465,8 @@ func TestPrintSummary_NoPanic(t *testing.T) {
 		}
 	}()
 
-	c := metrics.NewCollector()
-	c.AddResult(metrics.Result{
+	c := benchmetrics.NewCollector()
+	c.AddResult(benchmetrics.Result{
 		TestName: "Test",
 		Provider: "mock",
 		Success:  true,
@@ -483,6 +483,6 @@ func TestPrintSummary_EmptyCollector(t *testing.T) {
 		}
 	}()
 
-	c := metrics.NewCollector()
+	c := benchmetrics.NewCollector()
 	printSummary(c)
 }
