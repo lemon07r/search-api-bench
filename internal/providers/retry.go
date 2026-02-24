@@ -284,7 +284,7 @@ func (rc *RetryConfig) DoHTTPRequestDetailed(ctx context.Context, client *http.C
 			reqClone.Body = io.NopCloser(bytes.NewReader(requestBody))
 		}
 
-		resp, err := client.Do(reqClone)
+		resp, err := client.Do(reqClone) //nolint:gosec // URL is constructed from trusted config
 		if err != nil {
 			lastErr = fmt.Errorf("request failed: %w", err)
 			if attempt == rc.MaxRetries {

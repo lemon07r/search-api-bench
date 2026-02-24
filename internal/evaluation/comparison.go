@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/SanityWebEval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/benchmetrics"
 	"github.com/lamim/SanityWebEval/internal/providers"
 )
 
@@ -45,7 +45,7 @@ type ComparisonResult struct {
 }
 
 // CompareSearch compares search results between two providers
-func (c *Comparison) CompareSearch(resultA, resultB metrics.Result, itemsA, itemsB []providers.SearchItem) ComparisonResult {
+func (c *Comparison) CompareSearch(resultA, resultB benchmetrics.Result, itemsA, itemsB []providers.SearchItem) ComparisonResult {
 	comp := ComparisonResult{
 		TestName:  resultA.TestName,
 		TestType:  "search",
@@ -79,7 +79,7 @@ func (c *Comparison) CompareSearch(resultA, resultB metrics.Result, itemsA, item
 }
 
 // CompareExtract compares extraction results between two providers
-func (c *Comparison) CompareExtract(resultA, resultB metrics.Result, contentA, contentB string) ComparisonResult {
+func (c *Comparison) CompareExtract(resultA, resultB benchmetrics.Result, contentA, contentB string) ComparisonResult {
 	comp := ComparisonResult{
 		TestName:  resultA.TestName,
 		TestType:  "extract",
@@ -120,7 +120,7 @@ func (c *Comparison) CompareExtract(resultA, resultB metrics.Result, contentA, c
 }
 
 // CompareCrawl compares crawl results between two providers
-func (c *Comparison) CompareCrawl(resultA, resultB metrics.Result, pagesA, pagesB []providers.CrawledPage) ComparisonResult {
+func (c *Comparison) CompareCrawl(resultA, resultB benchmetrics.Result, pagesA, pagesB []providers.CrawledPage) ComparisonResult {
 	comp := ComparisonResult{
 		TestName:  resultA.TestName,
 		TestType:  "crawl",

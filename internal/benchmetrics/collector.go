@@ -1,5 +1,5 @@
-// Package metrics provides collection and aggregation of benchmark test results.
-package metrics
+// Package benchmetrics provides collection and aggregation of benchmark test results.
+package benchmetrics
 
 import (
 	"sort"

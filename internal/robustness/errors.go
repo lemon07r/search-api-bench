@@ -313,7 +313,7 @@ func (s *ErrorStats) FormatReport() string {
 		return sb.String()
 	}
 
-	sb.WriteString(fmt.Sprintf("  Total Errors: %d\n", total))
+	fmt.Fprintf(&sb, "  Total Errors: %d\n", total)
 
 	// Sort by count (simple bubble sort for small maps)
 	categories := make([]ErrorCategory, 0, len(s.counts))
@@ -332,7 +332,7 @@ func (s *ErrorStats) FormatReport() string {
 	for _, category := range categories {
 		count := s.counts[category]
 		percentage := float64(count) / float64(total) * 100
-		sb.WriteString(fmt.Sprintf("  %s: %d (%.1f%%)\n", category.String(), count, percentage))
+		fmt.Fprintf(&sb, "  %s: %d (%.1f%%)\n", category.String(), count, percentage)
 	}
 
 	return sb.String()

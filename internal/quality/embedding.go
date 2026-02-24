@@ -400,7 +400,7 @@ func (c *EmbeddingClient) embedWithSnapshot(ctx context.Context, texts []string,
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req) //nolint:gosec // URL is constructed from trusted config
 		if err != nil {
 			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, embeddingMaxRetries, err)
 			continue // Retry on network errors

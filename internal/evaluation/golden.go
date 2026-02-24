@@ -470,7 +470,7 @@ func FormatRegressionReport(regressions []RegressionResult) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Detected %d Regressions:\n", len(regressions)))
+	fmt.Fprintf(&sb, "Detected %d Regressions:\n", len(regressions))
 
 	criticalCount, warningCount := 0, 0
 	for _, r := range regressions {
@@ -481,12 +481,12 @@ func FormatRegressionReport(regressions []RegressionResult) string {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("  Critical: %d, Warnings: %d\n\n", criticalCount, warningCount))
+	fmt.Fprintf(&sb, "  Critical: %d, Warnings: %d\n\n", criticalCount, warningCount)
 
 	for _, r := range regressions {
-		sb.WriteString(fmt.Sprintf("  [%s] %s - %s\n", r.Severity, r.TestName, r.Metric))
-		sb.WriteString(fmt.Sprintf("    Baseline: %.2f, Current: %.2f (%.1f%%)\n",
-			r.BaselineValue, r.CurrentValue, r.ChangePercent))
+		fmt.Fprintf(&sb, "  [%s] %s - %s\n", r.Severity, r.TestName, r.Metric)
+		fmt.Fprintf(&sb, "    Baseline: %.2f, Current: %.2f (%.1f%%)\n",
+			r.BaselineValue, r.CurrentValue, r.ChangePercent)
 	}
 
 	return sb.String()

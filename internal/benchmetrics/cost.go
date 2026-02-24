@@ -1,5 +1,5 @@
-// Package metrics provides cost calculation utilities for benchmark results.
-package metrics
+// Package benchmetrics provides cost calculation utilities for benchmark results.
+package benchmetrics
 
 import "sync"
 

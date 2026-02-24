@@ -262,7 +262,7 @@ func (c *Client) searchInternal(ctx context.Context, query string, opts provider
 		req.Header.Set("X-Retain-Images", "none")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) //nolint:gosec // URL is constructed from trusted config
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "search request failed")
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -440,7 +440,7 @@ func (c *Client) extractInternal(ctx context.Context, pageURL string, _ provider
 		req.Header.Set("X-Retain-Images", "none")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) //nolint:gosec // URL is constructed from trusted config
 	if err != nil {
 		providers.LogError(ctx, err.Error(), "http", "extract request failed")
 		return nil, fmt.Errorf("request failed: %w", err)
