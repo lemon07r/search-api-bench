@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/providers"
 )
 
 const (

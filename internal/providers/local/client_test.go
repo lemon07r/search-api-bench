@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/providers"
-	"github.com/lamim/sanity-web-eval/internal/providers/testutil"
+	"github.com/lamim/SanityWebEval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/providers/testutil"
 )
 
 // setupTestServer creates a mock HTTP server for testing

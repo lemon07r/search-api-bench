@@ -123,10 +123,9 @@ type SearchQualityScore struct {
 	RerankerScore     float64 `json:"reranker_score"`     // 0-100, reranker confidence
 	SemanticAvailable bool    `json:"semantic_available,omitempty"`
 	RerankerAvailable bool    `json:"reranker_available,omitempty"`
-	TopKAccuracy      float64 `json:"top_k_accuracy"`   // 0-100, relevance of top N
-	ResultDiversity   float64 `json:"result_diversity"` // 0-100, domain/content variety
-	AuthorityScore    float64 `json:"authority_score"`  // 0-100, domain reputation
-	FreshnessScore    float64 `json:"freshness_score"`  // 0-100, content recency
+	TopKAccuracy    float64 `json:"top_k_accuracy"`   // 0-100, relevance of top N
+	ResultDiversity float64 `json:"result_diversity"` // 0-100, domain/content variety
+	FreshnessScore  float64 `json:"freshness_score"`  // 0-100, content recency
 	OverallScore      float64 `json:"overall_score"`    // 0-100, weighted composite
 }
 
@@ -176,7 +175,6 @@ type ComparisonAnalysis struct {
 type ScoreWeights struct {
 	SemanticWeight  float64
 	RerankerWeight  float64
-	AuthorityWeight float64
 	DiversityWeight float64
 	FreshnessWeight float64
 }
@@ -184,10 +182,9 @@ type ScoreWeights struct {
 // DefaultScoreWeights returns default weights for scoring
 func DefaultScoreWeights() ScoreWeights {
 	return ScoreWeights{
-		SemanticWeight:  0.35,
-		RerankerWeight:  0.25,
-		AuthorityWeight: 0.20,
-		DiversityWeight: 0.10,
+		SemanticWeight:  0.40,
+		RerankerWeight:  0.30,
+		DiversityWeight: 0.20,
 		FreshnessWeight: 0.10,
 	}
 }
@@ -196,13 +193,12 @@ func DefaultScoreWeights() ScoreWeights {
 func CalculateSearchScore(scores SearchQualityScore, weights ScoreWeights) float64 {
 	overall := scores.SemanticRelevance*weights.SemanticWeight +
 		scores.RerankerScore*weights.RerankerWeight +
-		scores.AuthorityScore*weights.AuthorityWeight +
 		scores.ResultDiversity*weights.DiversityWeight +
 		scores.FreshnessScore*weights.FreshnessWeight
 
 	// Normalize if weights don't sum to 1
 	totalWeight := weights.SemanticWeight + weights.RerankerWeight +
-		weights.AuthorityWeight + weights.DiversityWeight + weights.FreshnessWeight
+		weights.DiversityWeight + weights.FreshnessWeight
 
 	if totalWeight > 0 {
 		overall /= totalWeight

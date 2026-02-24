@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/providers"
-	"github.com/lamim/sanity-web-eval/internal/providers/testutil"
+	"github.com/lamim/SanityWebEval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/providers/testutil"
 )
 
 func TestSearch_ReturnsInlineTextContent(t *testing.T) {

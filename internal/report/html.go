@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/metrics"
 )
 
 // GenerateHTML creates an HTML report with charts

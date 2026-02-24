@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lamim/sanity-web-eval/internal/debug"
-	"github.com/lamim/sanity-web-eval/internal/providers"
+	"github.com/lamim/SanityWebEval/internal/debug"
+	"github.com/lamim/SanityWebEval/internal/providers"
 )
 
 const (

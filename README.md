@@ -13,14 +13,14 @@ make build
 ### 2. Run without API keys (local crawler only)
 
 ```bash
-./build/sanity-web-eval -providers local -no-search
+./build/SanityWebEval -providers local -no-search
 ```
 
 ### 3. Run a cloud provider
 
 ```bash
 # Requires FIRECRAWL_API_KEY in .env or environment
-./build/sanity-web-eval -providers firecrawl
+./build/SanityWebEval -providers firecrawl
 ```
 
 ### 4. Find outputs
@@ -171,46 +171,46 @@ Primary comparable rankings use normalized mode and native-capability operation 
 ## CLI Essentials
 
 ```bash
-./build/sanity-web-eval [flags]
+./build/SanityWebEval [flags]
 ```
 
 ### Common commands
 
 ```bash
 # All default providers (excludes Local and Jina)
-./build/sanity-web-eval
+./build/SanityWebEval
 
 # Specific providers
-./build/sanity-web-eval -providers firecrawl,tavily
+./build/SanityWebEval -providers firecrawl,tavily
 
 # Include Local provider (opt-in, no API key needed)
-./build/sanity-web-eval -local
-./build/sanity-web-eval -providers local    # Local only
+./build/SanityWebEval -local
+./build/SanityWebEval -providers local    # Local only
 
 # Include Jina (opt-in, high cost)
-./build/sanity-web-eval -jina
-./build/sanity-web-eval -providers jina    # Jina only
+./build/SanityWebEval -jina
+./build/SanityWebEval -providers jina    # Jina only
 
 # Output only markdown + json
-./build/sanity-web-eval -format md,json
+./build/SanityWebEval -format md,json
 
 # Select execution mode
-./build/sanity-web-eval -mode normalized
-./build/sanity-web-eval -mode native
+./build/SanityWebEval -mode normalized
+./build/SanityWebEval -mode native
 
 # Repeat each test/provider run to reduce noise
-./build/sanity-web-eval -repeats 5
+./build/SanityWebEval -repeats 5
 
 # Normalized-mode policy for emulated operations
-./build/sanity-web-eval -capability-policy strict
-./build/sanity-web-eval -capability-policy tagged
+./build/SanityWebEval -capability-policy strict
+./build/SanityWebEval -capability-policy tagged
 
 # Quick mode (up to 3 tests, timeout forced to 30s, crawl max_depth normalized to 1)
-./build/sanity-web-eval -quick
+./build/SanityWebEval -quick
 
 # Debug logs
-./build/sanity-web-eval -debug
-./build/sanity-web-eval -debug-full
+./build/SanityWebEval -debug
+./build/SanityWebEval -debug-full
 ```
 
 ### Flags

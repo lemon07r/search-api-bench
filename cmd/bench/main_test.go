@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lamim/sanity-web-eval/internal/config"
-	"github.com/lamim/sanity-web-eval/internal/metrics"
+	"github.com/lamim/SanityWebEval/internal/config"
+	"github.com/lamim/SanityWebEval/internal/metrics"
 )
 
 func TestParseProviders_All(t *testing.T) {
